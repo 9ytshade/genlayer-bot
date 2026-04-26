@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+groq
+genlayer-py
+python-dotenv
+pydantic>=2.4.0
+httpx
