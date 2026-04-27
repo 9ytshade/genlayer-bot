@@ -170,11 +170,19 @@ async def confirm_action(
     if intent["action"] == "deploy_contract":
         try:
             private_key = platform_wallet.get_private_key()
+            await logs_store.append("INFO", "DEPLOY_START", "Starting contract deployment process...", {"contract_name": intent.get("contract_name", "MyContract")})
+            
+            await logs_store.append("INFO", "DEPLOY_COMPILING", "Compiling intelligent contract code...")
+            # Simulation/Validation could go here
+            
+            await logs_store.append("INFO", "DEPLOY_ESTIMATING", "Estimating gas for deployment on GenLayer Studionet...")
+            
             tx_hash = deploy_contract(intent["code"], private_key=private_key)
-            await logs_store.append("SUCCESS", "DEPLOY_SUCCESS", "Contract deployment succeeded.", {"txHash": tx_hash, "user": current_user.id})
+            
+            await logs_store.append("SUCCESS", "DEPLOY_SUCCESS", "Contract successfully deployed!", {"txHash": tx_hash, "user": current_user.id})
             return {"txHash": tx_hash, "content": "Intelligent Contract successfully deployed on GenLayer Studionet."}
         except Exception as e:
-            await logs_store.append("ERROR", "DEPLOY_FAILED", "Deployment failed.", {"error": str(e), "intent": intent})
+            await logs_store.append("ERROR", "DEPLOY_FAILED", "Deployment process failed.", {"error": str(e), "intent": intent})
             raise HTTPException(status_code=502, detail=f"Deployment failed: {str(e)}")
         
     await logs_store.append("ERROR", "UNSUPPORTED_ACTION", "Unsupported action during confirmation.", {"intent": intent})

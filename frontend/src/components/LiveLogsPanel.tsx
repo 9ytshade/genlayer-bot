@@ -79,32 +79,57 @@ export default function LiveLogsPanel() {
     return 'OFFLINE';
   }, [status]);
 
+  const getLevelColor = (level: string) => {
+    switch (level.toUpperCase()) {
+      case 'SUCCESS': return 'text-accent-success border-accent-success/50 bg-accent-success/5';
+      case 'ERROR': return 'text-red-400 border-red-500/50 bg-red-500/5';
+      case 'WARN': return 'text-yellow-400 border-yellow-500/50 bg-yellow-500/5';
+      default: return 'text-accent-primary border-accent-primary/50 bg-accent-primary/5';
+    }
+  };
+
   return (
-    <div className="rounded-none border border-border-strong bg-bg-base p-3 h-full min-h-0 flex flex-col">
-      <div className="flex items-center justify-between mb-2">
-        <h3 className="text-[10px] uppercase tracking-[0.2em] text-text-secondary font-mono">Logs</h3>
-        <span className={`text-[10px] font-mono ${status === 'live' ? 'text-accent-success' : 'text-text-muted'}`}>
+    <div className="flex flex-col h-full min-h-0 bg-bg-surface overflow-hidden">
+      <div className="flex items-center justify-between p-4 border-b border-border-strong bg-bg-elevated shrink-0">
+        <div className="flex items-center gap-2">
+          <div className={`w-1.5 h-1.5 rounded-full ${status === 'live' ? 'bg-accent-success animate-pulse' : 'bg-text-muted'}`} />
+          <h3 className="text-[11px] uppercase tracking-[0.2em] text-text-primary font-bold font-display">System Operations</h3>
+        </div>
+        <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
+          status === 'live' ? 'text-accent-success border-accent-success/30' : 'text-text-muted border-border-strong'
+        }`}>
           {statusLabel}
         </span>
       </div>
 
-      <div className="space-y-2 overflow-y-auto pr-1 min-h-0">
+      <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-border-strong">
         {logs.length === 0 ? (
-          <div className="text-[11px] text-text-muted font-mono border border-border-subtle p-2">
-            Waiting for events...
+          <div className="h-full flex flex-col items-center justify-center opacity-50 space-y-3">
+            <div className="w-8 h-8 border border-dashed border-border-strong rounded-full flex items-center justify-center">
+              <div className="w-1 h-1 bg-accent-primary rounded-full animate-ping" />
+            </div>
+            <p className="text-[11px] font-mono uppercase tracking-widest">Awaiting system events...</p>
           </div>
         ) : (
           logs.slice().reverse().map((log, idx) => (
-            <div key={`${log.timestamp}-${idx}`} className="rounded-none border-l-2 border-accent-primary bg-bg-elevated p-2.5">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-[11px] font-mono font-bold text-accent-primary">{log.event}</p>
-                <span className="text-[9px] text-text-muted font-mono">{new Date(log.timestamp).toLocaleTimeString()}</span>
+            <div 
+              key={`${log.timestamp}-${idx}`} 
+              className={`rounded-none border p-3 transition-all hover:translate-x-1 ${getLevelColor(log.level)}`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex flex-col gap-1">
+                  <span className="text-[9px] font-mono opacity-60 uppercase tracking-wider">
+                    [{new Date(log.timestamp).toLocaleTimeString()}] {log.event}
+                  </span>
+                  <p className="text-[12px] font-medium leading-relaxed">{log.message}</p>
+                </div>
               </div>
-              <p className="text-[11px] text-text-secondary mt-0.5 leading-relaxed">{log.message}</p>
               {log.meta && Object.keys(log.meta).length > 0 && (
-                <pre className="mt-1 text-[10px] text-text-muted font-mono whitespace-pre-wrap break-words">
-                  {JSON.stringify(log.meta)}
-                </pre>
+                <div className="mt-2 pt-2 border-t border-current/10 overflow-hidden">
+                  <pre className="text-[10px] font-mono opacity-70 whitespace-pre-wrap break-all bg-black/20 p-2">
+                    {JSON.stringify(log.meta, null, 2)}
+                  </pre>
+                </div>
               )}
             </div>
           ))
