@@ -39,32 +39,36 @@ def register_user(user_create: UserCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Invalid Ethereum address")
     
     # Check if user already exists
-    existing_user = db.query(User).filter(
+    db_user = db.query(User).filter(
         User.connected_wallet_address == user_create.connected_wallet_address
     ).first()
     
-    if existing_user:
-        return existing_user
+    if not db_user:
+        # Create new user
+        db_user = User(connected_wallet_address=user_create.connected_wallet_address)
+        db.add(db_user)
+        db.commit()
+        db.refresh(db_user)
     
-    # Create new user
-    db_user = User(connected_wallet_address=user_create.connected_wallet_address)
-    db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
+    # Ensure user has a platform wallet
+    existing_wallet = db.query(PlatformWallet).filter(
+        PlatformWallet.user_id == db_user.id
+    ).first()
     
-    # Create a platform wallet for the user
-    w3 = Web3()
-    account = w3.eth.account.create()
-    
-    platform_wallet = PlatformWallet(
-        user_id=db_user.id,
-        address=account.address
-    )
-    platform_wallet.set_private_key(account.key.hex())
-    
-    db.add(platform_wallet)
-    db.commit()
-    db.refresh(platform_wallet)
+    if not existing_wallet:
+        # Create a platform wallet for the user
+        w3 = Web3()
+        account = w3.eth.account.create()
+        
+        platform_wallet = PlatformWallet(
+            user_id=db_user.id,
+            address=account.address
+        )
+        platform_wallet.set_private_key(account.key.hex())
+        
+        db.add(platform_wallet)
+        db.commit()
+        db.refresh(platform_wallet)
     
     return db_user
 
