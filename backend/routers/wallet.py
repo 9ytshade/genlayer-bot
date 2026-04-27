@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Query, Depends, HTTPException
+from fastapi import APIRouter, Query, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 import os
 from dotenv import load_dotenv
@@ -17,7 +17,7 @@ except ImportError:
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
 
-def get_current_user(authorization: str = None, db: Session = Depends(get_db)):
+def get_current_user(authorization: str = Header(None), db: Session = Depends(get_db)):
     """Extract user from Authorization header"""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
@@ -39,7 +39,7 @@ def get_balance(address: str | None = Query(default=None)):
 @router.post("/fund", response_model=TransactionResponse)
 def fund_platform_wallet(
     request: FundWalletRequest,
-    authorization: str = None,
+    authorization: str = Header(None),
     db: Session = Depends(get_db)
 ):
     """Fund user's platform wallet from admin wallet"""
