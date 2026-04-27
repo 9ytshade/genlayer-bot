@@ -27,6 +27,22 @@ def normalize_intent(raw_intent: dict[str, Any]) -> dict[str, Any]:
         recipient = raw_intent.get("recipient")
         intent["recipient"] = str(recipient).strip() if recipient is not None else None
 
+    elif action == "create_contract":
+        intent["contract_type"] = str(raw_intent.get("contract_type", "custom")).strip().lower()
+        intent["logic_description"] = str(raw_intent.get("logic_description", "")).strip()
+        intent["condition"] = str(raw_intent.get("condition", "")).strip()
+        
+        amount = raw_intent.get("amount")
+        if amount:
+            try:
+                intent["amount"] = float(amount)
+            except (TypeError, ValueError):
+                intent["amount"] = None
+        
+        recipient = raw_intent.get("recipient")
+        if recipient:
+            intent["recipient"] = str(recipient).strip()
+
     return intent
 
 
@@ -58,5 +74,20 @@ def validate_intent(intent: dict[str, Any]) -> tuple[bool, str]:
 
         if recipient == "0x0000000000000000000000000000000000000000":
             return False, "Recipient cannot be the zero address."
+            
+    if intent.get("action") == "create_contract":
+        if not intent.get("logic_description"):
+            return False, "Contract logic description is missing."
+        
+        if intent.get("contract_type") in ["escrow", "conditional_payment"]:
+            if not intent.get("amount") or intent.get("amount") <= 0:
+                return False, f"Amount is required for {intent.get('contract_type')}."
+            if not intent.get("recipient"):
+                return False, f"Recipient is required for {intent.get('contract_type')}."
+            if not Web3.is_address(intent.get("recipient")):
+                return False, "Recipient address is invalid."
+            
+            if intent.get("contract_type") == "conditional_payment" and not intent.get("condition"):
+                return False, "Condition is required for conditional payment."
 
     return True, ""

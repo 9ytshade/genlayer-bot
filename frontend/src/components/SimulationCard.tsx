@@ -18,10 +18,12 @@ export default function SimulationCard({ simulation }: { simulation: SimulationR
           </span>
         </div>
         
-        <div className="flex justify-between border-b border-border-subtle border-dotted pb-1">
-          <span className="text-text-muted">GAS_ESTIMATE:</span>
-          <span className="text-accent-primary font-bold">{simulation.gasEstimate} WEI</span>
-        </div>
+        {simulation.gasEstimate && (
+          <div className="flex justify-between border-b border-border-subtle border-dotted pb-1">
+            <span className="text-text-muted">GAS_ESTIMATE:</span>
+            <span className="text-accent-primary font-bold">{simulation.gasEstimate} WEI</span>
+          </div>
+        )}
 
         {simulation.summary && (
           <div className="mt-2 pt-2 border-t border-border-strong">

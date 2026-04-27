@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { API_BASE_URL } from '@/config';
 
 interface LogItem {
   timestamp: string;
@@ -13,7 +14,7 @@ interface LogItem {
 const MAX_ITEMS = 80;
 
 function getWsUrl(): string {
-  const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+  const apiBase = API_BASE_URL;
   const normalized = apiBase.replace(/\/$/, '');
   const wsBase = normalized.replace(/^http/, 'ws');
   return `${wsBase}/logs/stream`;

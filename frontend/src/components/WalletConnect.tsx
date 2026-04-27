@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Wallet, LogOut } from 'lucide-react';
+import { API_BASE_URL } from '@/config';
 
 interface WalletConnectProps {
   onWalletConnected?: (address: string) => void;
@@ -50,7 +51,7 @@ export default function WalletConnect({ onWalletConnected, onWalletDisconnected 
 
       // Register or get user in backend
       try {
-        const response = await fetch('http://localhost:8000/users/register', {
+        const response = await fetch(`${API_BASE_URL}/users/register`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Copy, RefreshCw, CreditCard } from 'lucide-react';
+import { API_BASE_URL } from '@/config';
 
 interface PlatformWallet {
   id: number;
@@ -31,7 +32,7 @@ export default function PlatformWalletDisplay({ connectedWallet }: PlatformWalle
         throw new Error('Not authenticated');
       }
 
-      const response = await fetch('http://localhost:8000/users/me/wallet', {
+      const response = await fetch(`${API_BASE_URL}/users/me/wallet`, {
         headers: {
           'Authorization': token,
         },
@@ -71,7 +72,7 @@ export default function PlatformWalletDisplay({ connectedWallet }: PlatformWalle
         throw new Error('Not authenticated');
       }
 
-      const response = await fetch('http://localhost:8000/wallet/fund', {
+      const response = await fetch(`${API_BASE_URL}/wallet/fund`, {
         method: 'POST',
         headers: {
           'Authorization': token,

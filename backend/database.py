@@ -8,9 +8,14 @@ load_dotenv()
 # Use SQLite for simplicity; can be upgraded to PostgreSQL
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./genlayer_bot.db")
 
+# Fix for SQLAlchemy 1.4+ which requires 'postgresql://' instead of 'postgres://'
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
 engine = create_engine(
     DATABASE_URL,
-    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {},
+    # SQLite requires check_same_thread=False
+    connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {},
     echo=False
 )
 
