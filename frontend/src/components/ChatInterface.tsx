@@ -22,6 +22,7 @@ export default function ChatInterface() {
   const [connectedWallet, setConnectedWallet] = useState<string | null>(null);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [recentCommands, setRecentCommands] = useState<string[]>([]);
+  const [isMounted, setIsMounted] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -33,6 +34,7 @@ export default function ChatInterface() {
   }, [messages, isLoading]);
 
   useEffect(() => {
+    setIsMounted(true);
     // Get wallet address from localStorage
     const stored = localStorage.getItem('connectedWallet');
     if (stored) {
@@ -122,6 +124,8 @@ export default function ChatInterface() {
   const hasPendingAction = messages.some(
     (m) => m.status === 'awaiting_confirmation' || m.status === 'executing'
   );
+
+  if (!isMounted) return null;
 
   return (
     <div className="flex flex-col h-full w-full mx-auto overflow-hidden bg-bg-base border-none md:border-x border-border-default relative">

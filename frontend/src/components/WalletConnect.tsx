@@ -19,8 +19,11 @@ export default function WalletConnect({ onWalletConnected, onWalletDisconnected 
     const savedAddress = localStorage.getItem('connectedWallet');
     if (savedAddress) {
       setConnectedAddress(savedAddress);
+      if (onWalletConnected) {
+        onWalletConnected(savedAddress);
+      }
     }
-  }, []);
+  }, [onWalletConnected]);
 
   const connectWallet = async () => {
     setIsConnecting(true);
