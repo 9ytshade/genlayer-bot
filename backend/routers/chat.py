@@ -7,7 +7,7 @@ try:
     from ..intent_parser import parse_intent
     from ..safety import validate_intent, normalize_intent
     from ..simulator import simulate_intent
-    from ..genlayer_client import send_transfer, get_balance
+    from ..genlayer_client import send_transfer, get_balance, deploy_contract
     from ..database import get_db
     from ..models import User, PlatformWallet
 except ImportError:
@@ -15,7 +15,7 @@ except ImportError:
     from intent_parser import parse_intent
     from safety import validate_intent, normalize_intent
     from simulator import simulate_intent
-    from genlayer_client import send_transfer, get_balance
+    from genlayer_client import send_transfer, get_balance, deploy_contract
     from database import get_db
     from models import User, PlatformWallet
 
@@ -103,6 +103,20 @@ async def handle_chat(
             "status": "awaiting_confirmation"
         }
         
+    if intent["action"] == "deploy_contract":
+        if not intent.get("code"):
+            return {
+                "content": "Please provide the Python code for your GenLayer Intelligent Contract.",
+                "intent": intent,
+                "status": "awaiting_input"
+            }
+        await logs_store.append("INFO", "AWAIT_CONFIRMATION", "Awaiting confirmation for contract deployment.")
+        return {
+            "content": f"I'm ready to deploy your contract '{intent.get('contract_name', 'MyContract')}'. Do you want me to proceed?",
+            "intent": intent,
+            "status": "awaiting_confirmation"
+        }
+        
     await logs_store.append("INFO", "AWAIT_CONFIRMATION", "Awaiting confirmation for transfer.", {"intent": intent})
     return {
         "content": "I have parsed your intent and simulated the outcome. Please review and confirm execution.",
@@ -152,6 +166,16 @@ async def confirm_action(
         except Exception as e:
             await logs_store.append("ERROR", "TRANSFER_FAILED", "Transfer failed.", {"error": str(e), "intent": intent})
             raise HTTPException(status_code=502, detail=f"Transfer failed: {str(e)}")
+            
+    if intent["action"] == "deploy_contract":
+        try:
+            private_key = platform_wallet.get_private_key()
+            tx_hash = deploy_contract(intent["code"], private_key=private_key)
+            await logs_store.append("SUCCESS", "DEPLOY_SUCCESS", "Contract deployment succeeded.", {"txHash": tx_hash, "user": current_user.id})
+            return {"txHash": tx_hash, "content": "Intelligent Contract successfully deployed on GenLayer Studionet."}
+        except Exception as e:
+            await logs_store.append("ERROR", "DEPLOY_FAILED", "Deployment failed.", {"error": str(e), "intent": intent})
+            raise HTTPException(status_code=502, detail=f"Deployment failed: {str(e)}")
         
     await logs_store.append("ERROR", "UNSUPPORTED_ACTION", "Unsupported action during confirmation.", {"intent": intent})
     raise HTTPException(status_code=400, detail="Unsupported action for execution")

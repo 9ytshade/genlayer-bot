@@ -7,7 +7,7 @@ import CommandPalette from './CommandPalette';
 import WalletConnect from './WalletConnect';
 import PlatformWalletDisplay from './PlatformWalletDisplay';
 import { MessageData, sendMessage, confirmAction } from '../lib/api';
-import { Send, Bot, Loader2, Command } from 'lucide-react';
+import { Send, Bot, Loader2, Command, FileText } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export default function ChatInterface() {
@@ -24,6 +24,7 @@ export default function ChatInterface() {
   const [recentCommands, setRecentCommands] = useState<string[]>([]);
   const [isMounted, setIsMounted] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -48,6 +49,53 @@ export default function ChatInterface() {
 
   const handleWalletDisconnected = () => {
     setConnectedWallet(null);
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.name.endsWith('.py')) {
+      alert('Please upload a Python (.py) file for GenLayer Intelligent Contracts.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const content = event.target?.result as string;
+      if (!content) return;
+
+      // Automatically send the deployment command with the code
+      const deployCmd = `Deploy this contract:\n\n${content}`;
+      
+      const userMsg: MessageData = {
+        id: Date.now().toString(),
+        role: 'user',
+        content: `Uploaded file: ${file.name}`
+      };
+
+      setMessages(prev => [...prev, userMsg]);
+      setIsLoading(true);
+
+      try {
+        const response = await sendMessage(deployCmd);
+        const botMsg: MessageData = {
+          id: (Date.now() + 1).toString(),
+          role: 'bot',
+          content: response.content || 'An error occurred.',
+          intent: response.intent,
+          simulation: response.simulation,
+          status: response.status
+        };
+        setMessages(prev => [...prev, botMsg]);
+      } catch (error) {
+        console.error(error);
+      } finally {
+        setIsLoading(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      }
+    };
+    reader.readAsText(file);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -228,6 +276,23 @@ export default function ChatInterface() {
             title={connectedWallet ? "Open command palette (Cmd+K)" : "Connect wallet first"}
           >
             <Command size={14} />
+          </button>
+
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileUpload}
+            accept=".py"
+            className="hidden"
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={!connectedWallet || isLoading}
+            className="flex items-center justify-center p-2 border border-border-strong hover:border-accent-primary text-text-secondary hover:text-accent-primary disabled:opacity-50 disabled:cursor-not-allowed transition-colors rounded-none"
+            title="Upload Intelligent Contract (.py)"
+          >
+            <FileText size={14} />
           </button>
 
           <input

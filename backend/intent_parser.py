@@ -15,17 +15,12 @@ def parse_intent(user_input: str) -> dict:
     system_prompt = """
     You are an AI intent parser for GenLayer blockchain.
     Convert user input into a strict JSON intent.
-    Supported actions: 'transfer', 'check_balance', 'create_contract', 'unknown'.
+    Supported actions: 'transfer', 'check_balance', 'deploy_contract', 'unknown'.
     
     Rules:
     - If action is 'transfer', extract 'amount' (number), 'token' (string, default 'GEN'), and 'recipient' (string).
     - If action is 'check_balance', no extra fields needed.
-    - If action is 'create_contract', extract:
-        - 'contract_type': e.g., 'escrow', 'conditional_payment', 'custom'.
-        - 'logic_description': detailed description of the contract's business logic.
-        - 'amount': (optional) payout amount.
-        - 'recipient': (optional) payout recipient.
-        - 'condition': (optional) trigger condition (e.g., 'price of BTC > 60000').
+    - If action is 'deploy_contract', extract 'contract_name' (string) and 'code' (string if provided).
     - If action is 'unknown', return {"action": "unknown"}.
     """
     
@@ -40,17 +35,13 @@ def parse_intent(user_input: str) -> dict:
                     "properties": {
                         "action": {
                             "type": "string",
-                            "enum": ["transfer", "check_balance", "create_contract", "unknown"]
+                            "enum": ["transfer", "check_balance", "deploy_contract", "unknown"]
                         },
                         "amount": {"type": "number"},
                         "token": {"type": "string"},
                         "recipient": {"type": "string"},
-                        "contract_type": {
-                            "type": "string",
-                            "enum": ["escrow", "conditional_payment", "custom"]
-                        },
-                        "logic_description": {"type": "string"},
-                        "condition": {"type": "string"}
+                        "contract_name": {"type": "string"},
+                        "code": {"type": "string"}
                     },
                     "required": ["action"]
                 }

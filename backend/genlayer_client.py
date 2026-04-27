@@ -94,6 +94,43 @@ class GenLayerClientWrapper:
             print(f"Error sending transfer: {e}")
             raise e
 
+    def deploy_contract(self, code: str, args: list = []) -> str:
+        try:
+            # Get latest nonce
+            nonce_hex = self._rpc_call("eth_getTransactionCount", [self.sender_address, "pending"])
+            nonce = int(nonce_hex, 16)
+
+            # GenLayer deployment transaction
+            tx_params = {
+                "from": self.sender_address,
+                "data": Web3.to_hex(text=code),
+                "nonce": nonce,
+                "chainId": self.chain_id,
+                "value": 0,
+            }
+
+            # Estimate gas for deployment
+            try:
+                gas_hex = self._rpc_call(
+                    "eth_estimateGas",
+                    [{"from": self.sender_address, "data": tx_params["data"]}],
+                )
+                tx_params["gas"] = int(gas_hex, 16)
+            except Exception:
+                tx_params["gas"] = 1000000 # Default for deployment if estimation fails
+
+            # Signed deployment
+            signed = self.account.sign_transaction(tx_params)
+            raw_tx = Web3.to_hex(signed.raw_transaction)
+            tx_hash = self._rpc_call("eth_sendRawTransaction", [raw_tx])
+            
+            # Wait for receipt to ensure it's deployed
+            self._wait_for_receipt_or_raise(tx_hash)
+            return tx_hash
+        except Exception as e:
+            print(f"Error deploying contract: {e}")
+            raise e
+
     def _wait_for_receipt_or_raise(self, tx_hash: str):
         deadline = time.time() + self.receipt_timeout_sec
         while time.time() < deadline:
@@ -124,3 +161,6 @@ def get_balance(address: str, private_key: str = None) -> float:
 
 def send_transfer(to_address: str, amount: float, private_key: str = None) -> str:
     return get_client(private_key).send_transfer(to_address, amount)
+
+def deploy_contract(code: str, args: list = [], private_key: str = None) -> str:
+    return get_client(private_key).deploy_contract(code, args)
