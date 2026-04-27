@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Copy, RefreshCw, CreditCard } from 'lucide-react';
+import { getPlatformWallet, getPlatformWalletBalance, fundPlatformWallet } from '../lib/api';
 
 interface PlatformWallet {
   id: number;
@@ -26,23 +27,15 @@ export default function PlatformWalletDisplay({ connectedWallet }: PlatformWalle
   const fetchWallet = async () => {
     setLoading(true);
     try {
-      const token = localStorage.getItem('authToken');
-      if (!token) {
-        throw new Error('Not authenticated');
-      }
-
-      const response = await fetch('http://localhost:8000/users/me/wallet', {
-        headers: {
-          'Authorization': token,
-        },
+      const walletData = await getPlatformWallet();
+      
+      // Also fetch the current balance from blockchain
+      const balanceData = await getPlatformWalletBalance();
+      
+      setWallet({
+        ...walletData,
+        balance: balanceData.balance,
       });
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch wallet');
-      }
-
-      const data = await response.json();
-      setWallet(data);
     } catch (error: any) {
       console.error('Error fetching wallet:', error);
     } finally {
@@ -66,36 +59,21 @@ export default function PlatformWalletDisplay({ connectedWallet }: PlatformWalle
     setFundingError('');
 
     try {
-      const token = localStorage.getItem('authToken');
-      if (!token) {
-        throw new Error('Not authenticated');
-      }
-
-      const response = await fetch('http://localhost:8000/wallet/fund', {
-        method: 'POST',
-        headers: {
-          'Authorization': token,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          amount: parseFloat(fundAmount),
-        }),
-      });
-
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.detail || 'Failed to fund wallet');
-      }
-
-      const result = await response.json();
-      setFundingStatus('success');
-      setFundAmount('');
+      const amount = parseFloat(fundAmount);
+      const result = await fundPlatformWallet(amount);
       
-      // Refresh wallet balance after 2 seconds
-      setTimeout(() => {
-        fetchWallet();
-        setFundingStatus('idle');
-      }, 2000);
+      if (result.status === 'success') {
+        setFundingStatus('success');
+        setFundAmount('');
+        
+        // Refresh wallet balance after 2 seconds
+        setTimeout(() => {
+          fetchWallet();
+          setFundingStatus('idle');
+        }, 2000);
+      } else {
+        throw new Error(result.error || 'Failed to fund wallet');
+      }
     } catch (error: any) {
       setFundingError(error.message);
       setFundingStatus('error');

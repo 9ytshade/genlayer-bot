@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Wallet, LogOut } from 'lucide-react';
+import { registerUser, getPlatformWallet, setWalletAuth, clearWalletAuth } from '../lib/api';
 
 interface WalletConnectProps {
   onWalletConnected?: (address: string) => void;
@@ -18,6 +19,7 @@ export default function WalletConnect({ onWalletConnected, onWalletDisconnected 
     const savedAddress = localStorage.getItem('connectedWallet');
     if (savedAddress) {
       setConnectedAddress(savedAddress);
+      setWalletAuth(savedAddress);
     }
   }, []);
 
@@ -44,32 +46,16 @@ export default function WalletConnect({ onWalletConnected, onWalletDisconnected 
         return;
       }
 
-      // Save to localStorage
-      localStorage.setItem('connectedWallet', address);
+      // Set wallet auth in localStorage
+      setWalletAuth(address);
       setConnectedAddress(address);
 
-      // Register or get user in backend
+      // Register user and create platform wallet
       try {
-        const response = await fetch('http://localhost:8000/users/register', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            connected_wallet_address: address,
-          }),
-        });
-
-        if (!response.ok) {
-          const errData = await response.json();
-          throw new Error(errData.detail || 'Failed to register user');
-        }
-
-        const userData = await response.json();
-        console.log('User registered:', userData);
+        await registerUser(address);
         
-        // Store auth token
-        localStorage.setItem('authToken', `Bearer ${address}`);
+        // Fetch platform wallet details to ensure it's created
+        await getPlatformWallet();
         
         if (onWalletConnected) {
           onWalletConnected(address);
@@ -77,6 +63,8 @@ export default function WalletConnect({ onWalletConnected, onWalletDisconnected 
       } catch (apiError: any) {
         console.error('API error:', apiError);
         setError(`Registration failed: ${apiError.message}`);
+        setConnectedAddress(null);
+        clearWalletAuth();
       }
     } catch (err: any) {
       console.error('Wallet connection error:', err);
@@ -87,8 +75,7 @@ export default function WalletConnect({ onWalletConnected, onWalletDisconnected 
   };
 
   const disconnectWallet = () => {
-    localStorage.removeItem('connectedWallet');
-    localStorage.removeItem('authToken');
+    clearWalletAuth();
     setConnectedAddress(null);
     if (onWalletDisconnected) {
       onWalletDisconnected();

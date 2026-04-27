@@ -73,7 +73,7 @@ export default function ChatInterface() {
         content: response.content || 'An error occurred.',
         intent: response.intent,
         simulation: response.simulation,
-        status: response.status
+        status: (response.status as 'awaiting_confirmation' | 'executing' | 'success' | 'error' | undefined)
       };
       setMessages(prev => [...prev, botMsg]);
     } catch (error) {
