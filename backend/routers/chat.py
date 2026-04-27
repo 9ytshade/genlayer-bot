@@ -1,5 +1,6 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends, Header
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 import os
 
 try:
@@ -7,16 +8,23 @@ try:
     from ..safety import validate_intent, normalize_intent
     from ..simulator import simulate_intent
     from ..genlayer_client import send_transfer, get_balance
+    from ..database import get_db
+    from ..models import User, PlatformWallet
 except ImportError:
     # Fallback when running from inside backend directory.
     from intent_parser import parse_intent
     from safety import validate_intent, normalize_intent
     from simulator import simulate_intent
     from genlayer_client import send_transfer, get_balance
+    from database import get_db
+    from models import User, PlatformWallet
+
 try:
     from ..logs_store import logs_store
 except ImportError:
     from logs_store import logs_store
+
+from web3 import Web3
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -26,10 +34,46 @@ class ChatRequest(BaseModel):
 class ConfirmRequest(BaseModel):
     intent: dict
 
+
+def get_current_user(authorization: str = Header(None), db: Session = Depends(get_db)):
+    """Extract user from token (wallet address)"""
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Authorization header required")
+    
+    try:
+        # Token format: "Bearer 0x..."
+        token = authorization.split(" ")[1]
+        if not Web3.is_address(token):
+            raise HTTPException(status_code=401, detail="Invalid wallet address")
+        
+        user = db.query(User).filter(User.connected_wallet_address == token).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found. Please register first.")
+        return user
+    except IndexError:
+        raise HTTPException(status_code=401, detail="Invalid token format. Use: Bearer 0x...")
+
+
 @router.post("")
-async def handle_chat(request: ChatRequest):
-    await logs_store.append("INFO", "CHAT_RECEIVED", "User message received.", {"message": request.message})
+async def handle_chat(
+    request: ChatRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    await logs_store.append("INFO", "CHAT_RECEIVED", "User message received.", {"message": request.message, "user": current_user.id})
+    
+    # Get user's platform wallet
+    platform_wallet = db.query(PlatformWallet).filter(
+        PlatformWallet.user_id == current_user.id
+    ).first()
+    
+    if not platform_wallet:
+        raise HTTPException(status_code=404, detail="Platform wallet not found. Please create one first.")
+    
     intent = normalize_intent(parse_intent(request.message))
+    intent["platform_wallet_address"] = platform_wallet.address
+    intent["user_id"] = current_user.id
+    
     await logs_store.append("INFO", "INTENT_PARSED", "Intent parsed.", {"intent": intent})
     
     if intent["action"] == "unknown":
@@ -68,9 +112,21 @@ async def handle_chat(request: ChatRequest):
     }
 
 @router.post("/confirm")
-async def confirm_action(request: ConfirmRequest):
+async def confirm_action(
+    request: ConfirmRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     intent = normalize_intent(request.intent)
-    await logs_store.append("INFO", "CONFIRM_RECEIVED", "Execution confirmed by user.", {"intent": intent})
+    await logs_store.append("INFO", "CONFIRM_RECEIVED", "Execution confirmed by user.", {"intent": intent, "user": current_user.id})
+
+    # Get user's platform wallet
+    platform_wallet = db.query(PlatformWallet).filter(
+        PlatformWallet.user_id == current_user.id
+    ).first()
+    
+    if not platform_wallet:
+        raise HTTPException(status_code=404, detail="Platform wallet not found")
 
     is_safe, error_msg = validate_intent(intent)
     if intent.get("action") != "check_balance" and not is_safe:
@@ -79,18 +135,19 @@ async def confirm_action(request: ConfirmRequest):
     
     if intent["action"] == "check_balance":
         try:
-            wallet_address = os.getenv("WALLET_ADDRESS", "0x0")
-            balance = get_balance(wallet_address)
-            await logs_store.append("SUCCESS", "BALANCE_SUCCESS", "Balance read succeeded.", {"balance": balance})
-            return {"txHash": f"Simulated Tx. Your balance is {balance} GEN."}
+            balance = get_balance(platform_wallet.address)
+            await logs_store.append("SUCCESS", "BALANCE_SUCCESS", "Balance read succeeded.", {"balance": balance, "user": current_user.id})
+            return {"txHash": f"Your platform wallet balance is {balance} GEN."}
         except Exception as e:
             await logs_store.append("ERROR", "BALANCE_FAILED", "Balance fetch failed.", {"error": str(e)})
             raise HTTPException(status_code=502, detail=f"Balance fetch failed: {str(e)}")
         
     if intent["action"] == "transfer":
         try:
-            tx_hash = send_transfer(intent["recipient"], intent["amount"])
-            await logs_store.append("SUCCESS", "TRANSFER_SUCCESS", "Transfer broadcast succeeded.", {"txHash": tx_hash})
+            # Use platform wallet private key for transfer
+            private_key = platform_wallet.get_private_key()
+            tx_hash = send_transfer(intent["recipient"], intent["amount"], private_key=private_key)
+            await logs_store.append("SUCCESS", "TRANSFER_SUCCESS", "Transfer broadcast succeeded.", {"txHash": tx_hash, "user": current_user.id})
             return {"txHash": tx_hash}
         except Exception as e:
             await logs_store.append("ERROR", "TRANSFER_FAILED", "Transfer failed.", {"error": str(e), "intent": intent})

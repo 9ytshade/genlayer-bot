@@ -4,10 +4,11 @@ import React, { useState, useRef, useEffect } from 'react';
 import MessageComponent from './Message';
 import QuickActions from './QuickActions';
 import CommandPalette from './CommandPalette';
+import WalletConnect from './WalletConnect';
+import PlatformWalletDisplay from './PlatformWalletDisplay';
 import { MessageData, sendMessage, confirmAction } from '../lib/api';
 import { Send, Bot, Loader2, Command } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import ConnectWalletButton from './ConnectWalletButton';
 
 export default function ChatInterface() {
   const [messages, setMessages] = useState<MessageData[]>([{
@@ -18,7 +19,7 @@ export default function ChatInterface() {
   
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [walletAddress, setWalletAddress] = useState<string | null>(null);
+  const [connectedWallet, setConnectedWallet] = useState<string | null>(null);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [recentCommands, setRecentCommands] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -33,11 +34,19 @@ export default function ChatInterface() {
 
   useEffect(() => {
     // Get wallet address from localStorage
-    const stored = localStorage.getItem('walletAddress');
+    const stored = localStorage.getItem('connectedWallet');
     if (stored) {
-      setWalletAddress(stored);
+      setConnectedWallet(stored);
     }
   }, []);
+
+  const handleWalletConnected = (address: string) => {
+    setConnectedWallet(address);
+  };
+
+  const handleWalletDisconnected = () => {
+    setConnectedWallet(null);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -125,18 +134,42 @@ export default function ChatInterface() {
           </div>
           <div>
             <h1 className="font-display text-[15px] font-semibold text-text-primary tracking-tight">AI Agent</h1>
-            {walletAddress && (
-              <p className="text-[10px] text-text-muted font-mono mt-0.5">{walletAddress.slice(0, 10)}...{walletAddress.slice(-8)}</p>
+            {connectedWallet && (
+              <p className="text-[10px] text-text-muted font-mono mt-0.5">{connectedWallet.slice(0, 10)}...{connectedWallet.slice(-8)}</p>
             )}
           </div>
         </div>
         
-        <ConnectWalletButton />
+        <WalletConnect 
+          onWalletConnected={handleWalletConnected}
+          onWalletDisconnected={handleWalletDisconnected}
+        />
       </div>
 
       {/* Chat Area */}
       <div className="flex-1 overflow-y-auto px-6 py-8 md:px-12 md:py-10 space-y-10 scroll-smooth">
-        {messages.length === 1 && (
+        {!connectedWallet && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg"
+          >
+            <p className="text-yellow-800 text-sm font-medium">
+              Please connect your wallet to get started.
+            </p>
+          </motion.div>
+        )}
+
+        {connectedWallet && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
+            <PlatformWalletDisplay connectedWallet={connectedWallet} />
+          </motion.div>
+        )}
+        
+        {messages.length === 1 && connectedWallet && (
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -186,8 +219,9 @@ export default function ChatInterface() {
           <button
             type="button"
             onClick={() => setCommandPaletteOpen(true)}
-            className="hidden md:flex items-center justify-center p-2 border border-border-strong hover:border-accent-primary text-text-secondary hover:text-accent-primary transition-colors rounded-none"
-            title="Open command palette (Cmd+K)"
+            disabled={!connectedWallet}
+            className="hidden md:flex items-center justify-center p-2 border border-border-strong hover:border-accent-primary text-text-secondary hover:text-accent-primary disabled:opacity-50 disabled:cursor-not-allowed transition-colors rounded-none"
+            title={connectedWallet ? "Open command palette (Cmd+K)" : "Connect wallet first"}
           >
             <Command size={14} />
           </button>
@@ -202,14 +236,15 @@ export default function ChatInterface() {
                 setCommandPaletteOpen(true);
               }
             }}
-            placeholder="> Type a command..."
+            placeholder={connectedWallet ? "> Type a command..." : "Connect wallet to chat..."}
             className="flex-1 bg-bg-surface border border-border-strong py-3.5 pl-4 pr-14 text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-primary focus:ring-1 focus:ring-accent-primary transition-colors font-mono text-sm rounded-none"
-            disabled={isLoading || messages.some(m => m.status === 'awaiting_confirmation' || m.status === 'executing')}
+            disabled={!connectedWallet || isLoading || messages.some(m => m.status === 'awaiting_confirmation' || m.status === 'executing')}
           />
           <button
             type="submit"
-            disabled={!input.trim() || isLoading || messages.some(m => m.status === 'awaiting_confirmation' || m.status === 'executing')}
+            disabled={!connectedWallet || !input.trim() || isLoading || messages.some(m => m.status === 'awaiting_confirmation' || m.status === 'executing')}
             className="absolute right-2 p-2 bg-accent-primary text-black hover:bg-white disabled:opacity-50 disabled:bg-border-strong disabled:text-text-muted transition-colors flex items-center justify-center rounded-none"
+            title={!connectedWallet ? "Connect wallet to send messages" : ""}
           >
             {isLoading ? (
               <Loader2 size={16} className="animate-spin" />

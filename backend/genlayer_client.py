@@ -8,9 +8,9 @@ import httpx
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
 
 class GenLayerClientWrapper:
-    def __init__(self):
+    def __init__(self, private_key: str = None):
         rpc_url = os.getenv("GENLAYER_RPC_URL")
-        private_key = os.getenv("WALLET_PRIVATE_KEY")
+        private_key = private_key or os.getenv("WALLET_PRIVATE_KEY")
         chain_id = int(os.getenv("GENLAYER_CHAIN_ID", "4221"))
         
         if not private_key:
@@ -111,14 +111,16 @@ class GenLayerClientWrapper:
 
 _client_wrapper = None
 
-def get_client():
+def get_client(private_key: str = None):
     global _client_wrapper
+    if private_key:
+        return GenLayerClientWrapper(private_key)
     if _client_wrapper is None:
         _client_wrapper = GenLayerClientWrapper()
     return _client_wrapper
 
-def get_balance(address: str) -> float:
-    return get_client().get_balance(address)
+def get_balance(address: str, private_key: str = None) -> float:
+    return get_client(private_key).get_balance(address)
 
-def send_transfer(to_address: str, amount: float) -> str:
-    return get_client().send_transfer(to_address, amount)
+def send_transfer(to_address: str, amount: float, private_key: str = None) -> str:
+    return get_client(private_key).send_transfer(to_address, amount)
