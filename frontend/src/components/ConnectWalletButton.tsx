@@ -38,9 +38,17 @@ export default function ConnectWalletButton() {
     }
   };
 
+  const walletLabel = account
+    ? `${formatAddress(account)}${balance !== null ? ` · ${balance.toFixed(4)} GEN` : isBalanceLoading ? ' · loading' : ' · --'}`
+    : 'Connect Wallet';
+
   useEffect(() => {
     const fetchBalance = async () => {
-      if (!isOpen || !account || !isConnected) return;
+      if (!account || !isConnected) {
+        setBalance(null);
+        setBalanceError(null);
+        return;
+      }
 
       setIsBalanceLoading(true);
       setBalanceError(null);
@@ -50,6 +58,7 @@ export default function ConnectWalletButton() {
         setBalance(data.balance);
       } catch (err) {
         console.error(err);
+        setBalance(null);
         setBalanceError('Unable to load balance');
       } finally {
         setIsBalanceLoading(false);
@@ -57,13 +66,13 @@ export default function ConnectWalletButton() {
     };
 
     fetchBalance();
-  }, [isOpen, account, isConnected]);
+  }, [account, isConnected]);
 
   if (isConnecting) {
     return (
       <button disabled className="flex items-center gap-2 px-3 py-1.5 bg-bg-base border border-border-strong text-[11px] font-mono text-text-muted cursor-not-allowed">
         <Loader2 size={12} className="animate-spin" />
-        [CONNECTING...]
+        Connecting...
       </button>
     );
   }
@@ -72,7 +81,7 @@ export default function ConnectWalletButton() {
     return (
       <div className="flex items-center gap-2">
         {error && (
-          <span className="text-[10px] text-accent-danger font-mono uppercase flex items-center gap-1 hidden md:flex">
+          <span className="text-[10px] text-accent-danger font-mono uppercase flex items-center gap-1">
             <AlertCircle size={10} /> {error}
           </span>
         )}
@@ -81,7 +90,7 @@ export default function ConnectWalletButton() {
           className="flex items-center gap-2 px-3 py-1.5 bg-black border border-accent-primary text-accent-primary hover:bg-accent-primary hover:text-black text-[11px] font-mono font-bold uppercase tracking-widest transition-colors shadow-none"
         >
           <Wallet size={12} />
-          [CONNECT_WALLET]
+          Connect Wallet
         </button>
       </div>
     );
@@ -94,7 +103,7 @@ export default function ConnectWalletButton() {
         className={`flex items-center gap-2 px-3 py-1.5 bg-black border ${isOpen ? 'border-text-primary text-text-primary' : 'border-border-strong text-text-secondary'} hover:border-text-primary hover:text-text-primary text-[11px] font-mono uppercase transition-colors`}
       >
         <span className="flex h-1.5 w-1.5 bg-accent-success shadow-[0_0_5px_rgba(212,255,0,0.8)]"></span>
-        {formatAddress(account!)}
+        {walletLabel}
       </button>
 
       <AnimatePresence>
@@ -131,7 +140,7 @@ export default function ConnectWalletButton() {
               >
                 <span className="flex items-center gap-2">
                   {copied ? <Check size={12} className="text-accent-success" /> : <Copy size={12} className="text-text-muted group-hover:text-accent-primary" />}
-                  {copied ? 'COPIED!' : 'COPY_ADDRESS'}
+                  {copied ? 'COPIED!' : 'Copy address'}
                 </span>
               </button>
               
@@ -143,7 +152,7 @@ export default function ConnectWalletButton() {
                 className="w-full text-left px-3 py-2 text-[11px] font-mono text-accent-danger hover:bg-accent-danger/10 transition-colors flex items-center gap-2"
               >
                 <LogOut size={12} />
-                [DISCONNECT]
+                Disconnect
               </button>
             </div>
           </motion.div>

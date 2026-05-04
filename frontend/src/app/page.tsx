@@ -51,7 +51,7 @@ export default function Home() {
             </aside>
 
             {/* Center chat */}
-            <section className="min-w-0 bg-bg-base">
+            <section className="min-w-0 bg-bg-base h-full flex flex-col overflow-hidden">
               <ChatInterface />
             </section>
 

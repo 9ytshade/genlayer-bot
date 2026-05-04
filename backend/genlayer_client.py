@@ -10,20 +10,16 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
 class GenLayerClientWrapper:
     def __init__(self, private_key: str = None):
         rpc_url = os.getenv("GENLAYER_RPC_URL")
-        private_key = private_key or os.getenv("WALLET_PRIVATE_KEY")
+        self.private_key = private_key or os.getenv("WALLET_PRIVATE_KEY")
         chain_id = int(os.getenv("GENLAYER_CHAIN_ID", "4221"))
         
-        if not private_key:
-            raise ValueError("WALLET_PRIVATE_KEY not found in environment variables")
-
         if not rpc_url:
             raise ValueError("GENLAYER_RPC_URL not found in environment variables")
 
         self.rpc_url = rpc_url
-        self.private_key = private_key
         self.chain_id = chain_id
-        self.account = create_account(private_key)
-        self.sender_address = self.account.address
+        self.account = create_account(self.private_key) if self.private_key else None
+        self.sender_address = self.account.address if self.account else None
         self.receipt_timeout_sec = int(os.getenv("TX_RECEIPT_TIMEOUT_SEC", "45"))
         self.receipt_poll_interval_sec = float(os.getenv("TX_RECEIPT_POLL_INTERVAL_SEC", "1.5"))
 
@@ -55,6 +51,9 @@ class GenLayerClientWrapper:
             return 0.0
 
     def send_transfer(self, to_address: str, amount: float) -> str:
+        if not self.account or not self.sender_address:
+            raise ValueError("Private key is required for sending transfers")
+
         try:
             # Sign locally and broadcast raw transaction to avoid RPC signer requirements.
             checksum_to = Web3.to_checksum_address(to_address)
@@ -95,6 +94,9 @@ class GenLayerClientWrapper:
             raise e
 
     def deploy_contract(self, code: str, args: list = []) -> str:
+        if not self.account or not self.sender_address:
+            raise ValueError("Private key is required for contract deployment")
+
         try:
             # Get latest nonce
             nonce_hex = self._rpc_call("eth_getTransactionCount", [self.sender_address, "pending"])

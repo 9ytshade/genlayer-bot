@@ -32,24 +32,23 @@ export interface WalletBalanceResponse {
   token: string;
 }
 
-export async function sendMessage(content: string): Promise<Partial<MessageData>> {
+export async function sendMessage(content: string, walletAddress?: string): Promise<Partial<MessageData>> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
 
   try {
-    const token = localStorage.getItem('authToken');
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
     };
-    
-    if (token) {
-      headers['Authorization'] = token;
-    }
+
+    const body = walletAddress 
+      ? { message: content, wallet_address: walletAddress }
+      : { message: content };
 
     const response = await fetch(`${API_URL}/chat`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ message: content }),
+      body: JSON.stringify(body),
       signal: controller.signal,
     });
     
@@ -74,21 +73,22 @@ export async function sendMessage(content: string): Promise<Partial<MessageData>
   }
 }
 
-export async function confirmAction(intent: Intent): Promise<{ txHash?: string; error?: string }> {
+export async function confirmAction(intent: Intent, walletAddress?: string, signedTransaction?: string): Promise<{ txHash?: string; balance?: number; error?: string }> {
   try {
-    const token = localStorage.getItem('authToken');
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
     };
-    
-    if (token) {
-      headers['Authorization'] = token;
-    }
+
+    const body = {
+      intent,
+      ...(walletAddress && { wallet_address: walletAddress }),
+      ...(signedTransaction && { signed_transaction: signedTransaction }),
+    };
 
     const response = await fetch(`${API_URL}/chat/confirm`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ intent }),
+      body: JSON.stringify(body),
     });
     
     if (!response.ok) {
@@ -140,3 +140,68 @@ export async function getWalletBalance(address?: string): Promise<WalletBalanceR
     clearTimeout(timeout);
   }
 }
+
+export interface TxParams {
+  chain_id: number;
+  gas_price: string;
+  nonce: number;
+  rpc_url: string;
+}
+
+export async function getTxParams(address: string): Promise<TxParams> {
+  const url = new URL(`${API_URL}/chat/tx-params`);
+  url.searchParams.set('address', address);
+
+  try {
+    const response = await fetch(url.toString());
+    if (!response.ok) {
+      throw new Error(`Failed to fetch tx params: ${response.status}`);
+    }
+    return response.json();
+  } catch (error) {
+    console.error("Error fetching tx params:", error);
+    throw error;
+  }
+}
+
+export interface TransferTxData {
+  to: string;
+  value: string;
+  data: string;
+}
+
+export interface DeployTxData {
+  data: string;
+  value: string;
+}
+
+export async function buildTransferTx(
+  recipient: string,
+  amount: number,
+  walletAddress: string
+): Promise<TransferTxData> {
+  const txParams = await getTxParams(walletAddress);
+  
+  const valueInWei = BigInt(amount * 1e18).toString(16);
+  
+  return {
+    to: recipient,
+    value: '0x' + valueInWei,
+    data: '0x',
+  };
+}
+
+export async function buildDeployTx(
+  code: string,
+  walletAddress: string
+): Promise<DeployTxData> {
+  await getTxParams(walletAddress);
+  
+  const codeHex = Buffer.from(code).toString('hex');
+  
+  return {
+    data: '0x' + codeHex,
+    value: '0x0',
+  };
+}
+

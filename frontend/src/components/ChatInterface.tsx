@@ -4,11 +4,11 @@ import React, { useState, useRef, useEffect } from 'react';
 import MessageComponent from './Message';
 import QuickActions from './QuickActions';
 import CommandPalette from './CommandPalette';
-import WalletConnect from './WalletConnect';
-import PlatformWalletDisplay from './PlatformWalletDisplay';
-import { MessageData, sendMessage, confirmAction } from '../lib/api';
+import ConnectWalletButton from './ConnectWalletButton';
+import { MessageData, sendMessage, confirmAction, buildTransferTx, buildDeployTx } from '../lib/api';
 import { Send, Bot, Loader2, Command, FileText } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useWallet } from '@/context/WalletContext';
 
 export default function ChatInterface() {
   const [messages, setMessages] = useState<MessageData[]>([{
@@ -19,12 +19,16 @@ export default function ChatInterface() {
   
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [connectedWallet, setConnectedWallet] = useState<string | null>(null);
+  const [isMounted, setIsMounted] = useState(false);
+  const { account: connectedWallet } = useWallet();
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [recentCommands, setRecentCommands] = useState<string[]>([]);
-  const [isMounted, setIsMounted] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -34,24 +38,8 @@ export default function ChatInterface() {
     scrollToBottom();
   }, [messages, isLoading]);
 
-  useEffect(() => {
-    setIsMounted(true);
-    // Get wallet address from localStorage
-    const stored = localStorage.getItem('connectedWallet');
-    if (stored) {
-      setConnectedWallet(stored);
-    }
-  }, []);
-
-  const handleWalletConnected = (address: string) => {
-    setConnectedWallet(address);
-  };
-
-  const handleWalletDisconnected = () => {
-    setConnectedWallet(null);
-  };
-
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!connectedWallet) return;
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -78,7 +66,7 @@ export default function ChatInterface() {
       setIsLoading(true);
 
       try {
-        const response = await sendMessage(deployCmd);
+        const response = await sendMessage(deployCmd, connectedWallet ?? undefined);
         const botMsg: MessageData = {
           id: (Date.now() + 1).toString(),
           role: 'bot',
@@ -100,7 +88,7 @@ export default function ChatInterface() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || isLoading) return;
+    if (!connectedWallet || !input.trim() || isLoading) return;
 
     const userMsg: MessageData = {
       id: Date.now().toString(),
@@ -116,7 +104,7 @@ export default function ChatInterface() {
     setIsLoading(true);
 
     try {
-      const response = await sendMessage(userMsg.content);
+      const response = await sendMessage(userMsg.content, connectedWallet ?? undefined);
       const botMsg: MessageData = {
         id: (Date.now() + 1).toString(),
         role: 'bot',
@@ -133,13 +121,18 @@ export default function ChatInterface() {
     }
   };
 
-  const handleQuickAction = (action: string) => {
-    setInput(action);
-  };
+  const { signTransaction } = useWallet();
 
   const handleConfirm = async (msgId: string) => {
     const msg = messages.find(m => m.id === msgId);
     if (!msg || !msg.intent) return;
+
+    if (!connectedWallet) {
+      setMessages(prev => prev.map(m => 
+        m.id === msgId ? { ...m, status: 'error', content: 'Wallet not connected' } : m
+      ));
+      return;
+    }
 
     // Update status to executing
     setMessages(prev => prev.map(m => 
@@ -147,18 +140,43 @@ export default function ChatInterface() {
     ));
 
     try {
-      const result = await confirmAction(msg.intent);
+      const intent = msg.intent;
+      let signedTx: string | undefined = undefined;
+
+      // For transfers and deployments, sign the transaction with the user's wallet
+      if (intent.action === 'transfer') {
+        const txData = await buildTransferTx(intent.recipient, intent.amount, connectedWallet);
+        signedTx = await signTransaction({
+          to: txData.to,
+          value: txData.value,
+          data: txData.data,
+        });
+      } else if (intent.action === 'deploy_contract') {
+        const txData = await buildDeployTx(intent.code, connectedWallet);
+        signedTx = await signTransaction({
+          to: undefined,
+          data: txData.data,
+          value: txData.value,
+        });
+      }
+
+      const result = await confirmAction(intent, connectedWallet, signedTx);
       setMessages(prev => prev.map(m => 
         m.id === msgId ? { 
           ...m, 
           status: result.error ? 'error' : 'success',
           txHash: result.txHash,
-          content: result.error ? `Execution failed: ${result.error}` : 'Transaction successfully executed on GenLayer.'
+          content: result.error
+            ? `Execution failed: ${result.error}`
+            : result.balance !== undefined
+              ? `Your wallet balance is ${result.balance} GEN.`
+              : 'Transaction successfully executed on GenLayer.'
         } : m
       ));
-    } catch (error) {
-       setMessages(prev => prev.map(m => 
-        m.id === msgId ? { ...m, status: 'error', content: 'Network error during execution.' } : m
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Network error during execution.';
+      setMessages(prev => prev.map(m => 
+        m.id === msgId ? { ...m, status: 'error', content: errorMessage } : m
       ));
     }
   };
@@ -169,9 +187,10 @@ export default function ChatInterface() {
     ));
   };
 
-  const hasPendingAction = messages.some(
-    (m) => m.status === 'awaiting_confirmation' || m.status === 'executing'
-  );
+  const handleQuickAction = (command: string) => {
+    setInput(command);
+    setRecentCommands(prev => [command, ...prev.filter((item) => item !== command)].slice(0, 5));
+  };
 
   if (!isMounted) return null;
 
@@ -192,10 +211,7 @@ export default function ChatInterface() {
           </div>
         </div>
         
-        <WalletConnect 
-          onWalletConnected={handleWalletConnected}
-          onWalletDisconnected={handleWalletDisconnected}
-        />
+        <ConnectWalletButton />
       </div>
 
       {/* Chat Area */}
@@ -212,15 +228,6 @@ export default function ChatInterface() {
           </motion.div>
         )}
 
-        {connectedWallet && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-          >
-            <PlatformWalletDisplay connectedWallet={connectedWallet} />
-          </motion.div>
-        )}
-        
         {messages.length === 1 && connectedWallet && (
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
@@ -251,11 +258,11 @@ export default function ChatInterface() {
               </div>
               <div className="flex flex-col gap-1 items-start">
                 <span className="text-xs text-text-muted font-medium ml-1">GenLayer AI</span>
-                <div className="px-4 py-3 rounded-2xl bg-white/[0.04] border border-white/10 rounded-tl-md shadow-sm flex items-center gap-2 backdrop-blur-md">
+                <div className="px-4 py-3 rounded-2xl bg-white/4 border border-white/10 rounded-tl-md shadow-sm flex items-center gap-2 backdrop-blur-md">
                   <div className="flex gap-1">
-                    <span className="w-2 h-2 rounded-full bg-accent-primary/60 animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <span className="w-2 h-2 rounded-full bg-accent-primary/60 animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <span className="w-2 h-2 rounded-full bg-accent-primary/60 animate-bounce" style={{ animationDelay: '300ms' }} />
+                    <span className="w-2 h-2 rounded-full bg-accent-primary/60 animate-bounce delay-0" />
+                    <span className="w-2 h-2 rounded-full bg-accent-primary/60 animate-bounce delay-150" />
+                    <span className="w-2 h-2 rounded-full bg-accent-primary/60 animate-bounce delay-300" />
                   </div>
                 </div>
               </div>
@@ -283,6 +290,7 @@ export default function ChatInterface() {
             ref={fileInputRef}
             onChange={handleFileUpload}
             accept=".py"
+            aria-label="Upload Python contract file"
             className="hidden"
           />
           <button
@@ -297,6 +305,7 @@ export default function ChatInterface() {
 
           <input
             type="text"
+            aria-label="Chat message"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
