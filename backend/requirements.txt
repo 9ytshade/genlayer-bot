@@ -1,7 +1,7 @@
 fastapi
 uvicorn
 groq
-genlayer-py
+genlayer-py>=0.1.0,<0.6.0
 python-dotenv
 pydantic>=2.4.0
 httpx
