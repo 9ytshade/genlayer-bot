@@ -30,8 +30,37 @@ def normalize_intent(raw_intent: dict[str, Any]) -> dict[str, Any]:
     elif action in {"create_contract", "deploy_contract"}:
         intent["action"] = "deploy_contract"
         intent["contract_type"] = str(raw_intent.get("contract_type", "custom")).strip().lower()
+        intent["contract_name"] = str(raw_intent.get("contract_name", "IntelligentContract")).strip() or "IntelligentContract"
         intent["logic_description"] = str(raw_intent.get("logic_description", "")).strip()
         intent["condition"] = str(raw_intent.get("condition", "")).strip()
+        code = raw_intent.get("code")
+        if code is not None:
+            intent["code"] = str(code)
+
+        constructor_args = raw_intent.get("constructor_args", raw_intent.get("args", []))
+        intent["constructor_args"] = constructor_args if isinstance(constructor_args, list) else []
+
+        constructor_kwargs = raw_intent.get("constructor_kwargs", raw_intent.get("kwargs", {}))
+        intent["constructor_kwargs"] = constructor_kwargs if isinstance(constructor_kwargs, dict) else {}
+
+        try:
+            intent["deploy_value"] = float(raw_intent.get("deploy_value", raw_intent.get("value", 0)) or 0)
+        except (TypeError, ValueError):
+            intent["deploy_value"] = 0
+
+        try:
+            gas_limit = raw_intent.get("gas_limit")
+            intent["gas_limit"] = int(gas_limit) if gas_limit else None
+        except (TypeError, ValueError):
+            intent["gas_limit"] = None
+
+        try:
+            rotations = raw_intent.get("consensus_max_rotations")
+            intent["consensus_max_rotations"] = int(rotations) if rotations else None
+        except (TypeError, ValueError):
+            intent["consensus_max_rotations"] = None
+
+        intent["leader_only"] = bool(raw_intent.get("leader_only", False))
         
         amount = raw_intent.get("amount")
         if amount:
@@ -77,8 +106,15 @@ def validate_intent(intent: dict[str, Any]) -> tuple[bool, str]:
             return False, "Recipient cannot be the zero address."
             
     if intent.get("action") == "deploy_contract":
-        if not intent.get("logic_description"):
+        if not intent.get("code") and not intent.get("logic_description"):
             return False, "Contract logic description is missing."
+
+        if intent.get("deploy_value", 0) < 0:
+            return False, "Deployment value cannot be negative."
+
+        gas_limit = intent.get("gas_limit")
+        if gas_limit is not None and gas_limit < 21000:
+            return False, "Deployment gas limit is too low."
         
         if intent.get("contract_type") in ["escrow", "conditional_payment"]:
             if not intent.get("amount") or intent.get("amount") <= 0:

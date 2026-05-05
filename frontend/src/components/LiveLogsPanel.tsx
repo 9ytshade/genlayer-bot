@@ -89,7 +89,7 @@ export default function LiveLogsPanel() {
   };
 
   return (
-    <div className="flex flex-col h-full min-h-0 bg-bg-surface overflow-hidden">
+    <div className="flex flex-1 flex-col min-h-0 bg-bg-surface overflow-hidden">
       <div className="flex items-center justify-between p-4 border-b border-border-strong bg-bg-elevated shrink-0">
         <div className="flex items-center gap-2">
           <div className={`w-1.5 h-1.5 rounded-full ${status === 'live' ? 'bg-accent-success animate-pulse' : 'bg-text-muted'}`} />
@@ -102,7 +102,7 @@ export default function LiveLogsPanel() {
         </span>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-border-strong">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 space-y-4 scrollbar-thin scrollbar-thumb-border-strong">
         {logs.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center opacity-50 space-y-3">
             <div className="w-8 h-8 border border-dashed border-border-strong rounded-full flex items-center justify-center">

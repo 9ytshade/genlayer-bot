@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Search, X, Command, Zap, History } from 'lucide-react';
+import { Search, X, Command, History } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface CommandPaletteProps {

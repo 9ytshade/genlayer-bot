@@ -3,6 +3,7 @@ import { MessageData } from '../lib/api';
 import IntentCard from './IntentCard';
 import SimulationCard from './SimulationCard';
 import ConfirmationButtons from './ConfirmationButtons';
+import DeployContractPanel from './DeployContractPanel';
 import { Terminal, User, Check, Loader2, Copy, AlertCircle, RefreshCw } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -10,11 +11,13 @@ interface MessageProps {
   msg: MessageData;
   onConfirm: (id: string) => void;
   onCancel: (id: string) => void;
+  onUpdateIntent: (id: string, patch: Partial<NonNullable<MessageData['intent']>>) => void;
 }
 
-export default function Message({ msg, onConfirm, onCancel }: MessageProps) {
+export default function Message({ msg, onConfirm, onCancel, onUpdateIntent }: MessageProps) {
   const isUser = msg.role === 'user';
   const [copied, setCopied] = useState(false);
+  const [copiedAddress, setCopiedAddress] = useState<string | null>(null);
   const isRealTxHash = Boolean(msg.txHash && /^0x[a-fA-F0-9]{64}$/.test(msg.txHash));
   const txExplorerBase = process.env.NEXT_PUBLIC_EXPLORER_TX_URL;
   const txExplorerUrl = isRealTxHash && txExplorerBase ? `${txExplorerBase}${msg.txHash}` : null;
@@ -23,6 +26,12 @@ export default function Message({ msg, onConfirm, onCancel }: MessageProps) {
     navigator.clipboard.writeText(hash);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleCopyAddress = (address: string) => {
+    navigator.clipboard.writeText(address);
+    setCopiedAddress(address);
+    setTimeout(() => setCopiedAddress(null), 2000);
   };
 
   const formatTime = (id: string) => {
@@ -65,6 +74,16 @@ export default function Message({ msg, onConfirm, onCancel }: MessageProps) {
           </div>
         )}
 
+        {!isUser && msg.intent?.action === 'deploy_contract' && (
+          <div className="w-full">
+            <DeployContractPanel
+              intent={msg.intent}
+              disabled={msg.status === 'executing' || msg.status === 'success'}
+              onChange={(patch) => onUpdateIntent(msg.id, patch)}
+            />
+          </div>
+        )}
+
         {!isUser && msg.status === 'awaiting_confirmation' && msg.intent && (
           <div className="w-full">
             <ConfirmationButtons 
@@ -99,6 +118,48 @@ export default function Message({ msg, onConfirm, onCancel }: MessageProps) {
                 <Copy size={12} className={copied ? 'text-accent-primary' : ''} />
               </button>
             </div>
+            {msg.consensusTxId && (
+              <div className="opacity-80 pl-6 break-all">
+                <span>{`CONSENSUS_TX: ${msg.consensusTxId}`}</span>
+              </div>
+            )}
+            {msg.contractAddress && (
+              <div className="pl-6">
+                <div className="mb-1 uppercase tracking-widest">CONTRACT_ADDRESS</div>
+                <div className="flex items-center justify-between gap-2 break-all">
+                  <span>{msg.contractAddress}</span>
+                  <button
+                    onClick={() => handleCopyAddress(msg.contractAddress!)}
+                    className="ml-2 p-1 hover:bg-accent-success/20 rounded transition-colors"
+                    title="Copy contract address"
+                  >
+                    <Copy size={12} className={copiedAddress === msg.contractAddress ? 'text-accent-primary' : ''} />
+                  </button>
+                </div>
+              </div>
+            )}
+            {msg.derivedAddresses && msg.derivedAddresses.length > 0 && (
+              <div className="pl-6">
+                <div className="mb-1 uppercase tracking-widest">GENERATED_ADDRESSES</div>
+                <div className="mb-2 text-[11px] normal-case tracking-normal text-text-muted">
+                  Use these addresses as parameters when deploying dependent contracts.
+                </div>
+                <div className="flex flex-col gap-2">
+                  {msg.derivedAddresses.map((address) => (
+                    <div key={address} className="flex items-center justify-between gap-2 break-all">
+                      <span>{address}</span>
+                      <button
+                        onClick={() => handleCopyAddress(address)}
+                        className="ml-2 p-1 hover:bg-accent-success/20 rounded transition-colors"
+                        title="Copy derived address"
+                      >
+                        <Copy size={12} className={copiedAddress === address ? 'text-accent-primary' : ''} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             {txExplorerUrl && (
               <a
                 href={txExplorerUrl}

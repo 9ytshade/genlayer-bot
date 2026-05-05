@@ -1,7 +1,7 @@
 import os
 
 SUPPORTED_NETWORKS = ("bradbury", "studionet")
-DEFAULT_NETWORK = "bradbury"
+DEFAULT_NETWORK = "studionet"
 
 
 def normalize_network(network: str | None) -> str:

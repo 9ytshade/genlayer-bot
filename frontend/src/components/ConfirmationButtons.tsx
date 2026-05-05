@@ -17,6 +17,15 @@ const estimateGas = (intent: Intent): number => {
   if (intent.action === 'check_balance') {
     return 2300;
   }
+  if (intent.action === 'deploy_contract') {
+    if (typeof intent.gas_limit === 'number') {
+      return intent.gas_limit;
+    }
+    if (typeof intent.gas_limit_text === 'string' && intent.gas_limit_text.trim()) {
+      return Number(intent.gas_limit_text);
+    }
+    return 1500000;
+  }
   return 50000;
 };
 

@@ -60,9 +60,24 @@ export default function IntentCard({ intent }: { intent: Intent }) {
         )}
 
         {intent.action !== 'transfer' && intent.action !== 'check_balance' && (
-          <pre className="text-text-secondary overflow-x-auto">
-            {JSON.stringify(intent, null, 2)}
-          </pre>
+          <div className="flex flex-col gap-2">
+            <div className="flex justify-between border-b border-border-subtle border-dotted pb-1">
+              <span className="text-text-muted">CONTRACT:</span>
+              <span className="text-accent-primary font-bold">{intent.contract_name || 'IntelligentContract'}</span>
+            </div>
+            <div className="flex justify-between border-b border-border-subtle border-dotted pb-1">
+              <span className="text-text-muted">SOURCE:</span>
+              <span className="text-accent-success font-bold">{typeof intent.source_file_name === 'string' ? intent.source_file_name : 'INLINE'}</span>
+            </div>
+            <div className="flex justify-between border-b border-border-subtle border-dotted pb-1">
+              <span className="text-text-muted">VALUE:</span>
+              <span className="text-accent-primary font-bold">{intent.deploy_value_text || intent.deploy_value || 0} GEN</span>
+            </div>
+            <div className="flex justify-between border-b border-border-subtle border-dotted pb-1">
+              <span className="text-text-muted">ARGS:</span>
+              <span className="text-text-secondary">{typeof intent.constructor_args_text === 'string' ? intent.constructor_args_text : '[]'}</span>
+            </div>
+          </div>
         )}
       </div>
     </div>

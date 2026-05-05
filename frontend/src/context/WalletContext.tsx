@@ -3,15 +3,28 @@
 import React, { createContext, useContext, useState, ReactNode } from 'react';
 import { useAccount, useDisconnect, useWalletClient } from 'wagmi';
 import { useConnectModal } from '@rainbow-me/rainbowkit';
+import type { Address, Hash, Hex } from 'viem';
+
+interface WalletTransactionRequest {
+  to?: Address;
+  data?: Hex;
+  value?: bigint;
+  chainId?: number;
+  nonce?: number;
+  gas?: bigint;
+  gasPrice?: bigint;
+  maxFeePerGas?: bigint;
+  maxPriorityFeePerGas?: bigint;
+}
 
 interface WalletContextType {
-  account: string | null;
+  account: Address | null;
   isConnected: boolean;
   isConnecting: boolean;
   error: string | null;
   connect: () => Promise<void>;
   disconnect: () => void;
-  signTransaction: (txData: any) => Promise<string>;  // Returns signed raw transaction hex
+  sendTransaction: (txData: WalletTransactionRequest) => Promise<Hash>;
 }
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
@@ -38,7 +51,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     wagmiDisconnect();
   };
 
-  const signTransaction = async (txData: any): Promise<string> => {
+  const sendTransaction = async (txData: WalletTransactionRequest): Promise<Hash> => {
     if (!account) {
       throw new Error('No account connected');
     }
@@ -48,21 +61,41 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      const signature = await walletClient.signTransaction({
-        account,
-        ...txData,
-      });
+      const request = txData.gasPrice !== undefined
+        ? {
+            account,
+            to: txData.to,
+            data: txData.data,
+            value: txData.value,
+            chainId: txData.chainId,
+            nonce: txData.nonce,
+            gas: txData.gas,
+            gasPrice: txData.gasPrice,
+          }
+        : {
+            account,
+            to: txData.to,
+            data: txData.data,
+            value: txData.value,
+            chainId: txData.chainId,
+            nonce: txData.nonce,
+            gas: txData.gas,
+            maxFeePerGas: txData.maxFeePerGas,
+            maxPriorityFeePerGas: txData.maxPriorityFeePerGas,
+          };
 
-      return signature;
+      const txHash = await walletClient.sendTransaction(request);
+
+      return txHash;
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to sign transaction';
+      const message = err instanceof Error ? err.message : 'Failed to send transaction';
       setError(message);
       throw err;
     }
   };
 
   return (
-    <WalletContext.Provider value={{ account, isConnected, isConnecting: false, error, connect, disconnect, signTransaction }}>
+    <WalletContext.Provider value={{ account, isConnected, isConnecting: false, error, connect, disconnect, sendTransaction }}>
       {children}
     </WalletContext.Provider>
   );
@@ -74,11 +107,4 @@ export function useWallet() {
     throw new Error('useWallet must be used within a WalletProvider');
   }
   return context;
-}
-
-// Add TypeScript support for window.ethereum
-declare global {
-  interface Window {
-    ethereum?: any;
-  }
 }

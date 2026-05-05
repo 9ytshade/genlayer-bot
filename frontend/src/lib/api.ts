@@ -3,7 +3,25 @@ export interface Intent {
   amount?: number;
   token?: string;
   recipient?: string;
-  [key: string]: any;
+  address?: string;
+  code?: string;
+  contract_name?: string;
+  contract_type?: string;
+  logic_description?: string;
+  condition?: string;
+  constructor_args?: unknown[];
+  constructor_kwargs?: Record<string, unknown>;
+  constructor_args_text?: string;
+  constructor_kwargs_text?: string;
+  deploy_value?: number;
+  deploy_value_text?: string;
+  gas_limit?: number | null;
+  gas_limit_text?: string;
+  consensus_max_rotations?: number | null;
+  consensus_max_rotations_text?: string;
+  leader_only?: boolean;
+  source_file_name?: string;
+  [key: string]: unknown;
 }
 
 export interface SimulationResult {
@@ -20,18 +38,50 @@ export interface MessageData {
   content: string;
   intent?: Intent;
   simulation?: SimulationResult;
-  status?: 'pending' | 'simulating' | 'awaiting_confirmation' | 'executing' | 'success' | 'error';
+  status?: 'pending' | 'simulating' | 'awaiting_input' | 'awaiting_confirmation' | 'executing' | 'success' | 'error';
   txHash?: string;
+  consensusTxId?: string;
+  contractAddress?: string;
+  derivedAddresses?: string[];
 }
 
 import { API_BASE_URL as API_URL } from '@/config';
 import type { NetworkKey } from '@/config';
 import { parseEther } from 'viem';
+import type { Address, Hex } from 'viem';
 
 export interface WalletBalanceResponse {
   address: string;
   balance: number;
   token: string;
+}
+
+export interface ContractValidationResult {
+  valid: boolean;
+  message: string;
+  errors: string[];
+  warnings: string[];
+  contract_names: string[];
+}
+
+export async function validateContractFile(code: string, fileName: string): Promise<ContractValidationResult> {
+  const response = await fetch(`${API_URL}/chat/validate-contract`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      code,
+      file_name: fileName,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Failed to validate contract: ${response.status}`);
+  }
+
+  return response.json();
 }
 
 export async function sendMessage(content: string, walletAddress?: string, network?: NetworkKey): Promise<Partial<MessageData>> {
@@ -79,8 +129,9 @@ export async function confirmAction(
   intent: Intent,
   walletAddress?: string,
   signedTransaction?: string,
+  txHash?: string,
   network?: NetworkKey
-): Promise<{ txHash?: string; balance?: number; error?: string }> {
+): Promise<{ txHash?: string; consensusTxId?: string; contractAddress?: string; derivedAddresses?: string[]; balance?: number; content?: string; error?: string }> {
   try {
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
@@ -90,6 +141,7 @@ export async function confirmAction(
       intent,
       ...(walletAddress && { wallet_address: walletAddress }),
       ...(signedTransaction && { signed_transaction: signedTransaction }),
+      ...(txHash && { tx_hash: txHash }),
       ...(network && { network }),
     };
 
@@ -133,7 +185,7 @@ export async function getWalletBalance(address?: string, network?: NetworkKey): 
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8000);
+  const timeout = setTimeout(() => controller.abort(), 20000);
 
   try {
     const response = await fetch(url.toString(), { signal: controller.signal });
@@ -178,9 +230,9 @@ export async function getTxParams(address: string, network: NetworkKey): Promise
 }
 
 export interface TransferTxData {
-  to: string;
+  to: Address;
   value: bigint;
-  data: string;
+  data: Hex;
   chainId: number;
   nonce: number;
   gas: bigint;
@@ -188,12 +240,15 @@ export interface TransferTxData {
 }
 
 export interface DeployTxData {
-  data: string;
+  to: Address;
+  data: Hex;
   value: bigint;
   chainId: number;
   nonce: number;
   gas: bigint;
-  gasPrice: bigint;
+  gasPrice?: bigint;
+  maxFeePerGas?: bigint;
+  maxPriorityFeePerGas?: bigint;
 }
 
 export async function buildTransferTx(
@@ -205,7 +260,7 @@ export async function buildTransferTx(
   const txParams = await getTxParams(walletAddress, network);
 
   return {
-    to: recipient,
+    to: recipient as Address,
     value: parseEther(amount.toString()),
     data: '0x',
     chainId: txParams.chain_id,
@@ -215,20 +270,54 @@ export async function buildTransferTx(
   };
 }
 
+export interface DeployTxRequestPayload {
+  code: string;
+  constructor_args?: unknown[];
+  constructor_kwargs?: Record<string, unknown>;
+  deploy_value_wei?: string;
+  gas_limit?: number | null;
+  consensus_max_rotations?: number | null;
+  leader_only?: boolean;
+}
+
 export async function buildDeployTx(
-  code: string,
+  payload: DeployTxRequestPayload,
   walletAddress: string,
   network: NetworkKey
 ): Promise<DeployTxData> {
-  const txParams = await getTxParams(walletAddress, network);
-  const codeHex = Buffer.from(code).toString('hex');
+  const response = await fetch(`${API_URL}/chat/deploy-tx`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      address: walletAddress,
+      code: payload.code,
+      constructor_args: payload.constructor_args ?? [],
+      constructor_kwargs: payload.constructor_kwargs ?? {},
+      value_wei: payload.deploy_value_wei ?? '0',
+      gas_limit: payload.gas_limit ?? null,
+      consensus_max_rotations: payload.consensus_max_rotations ?? null,
+      leader_only: payload.leader_only ?? false,
+      network,
+    }),
+  });
 
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Failed to prepare deploy transaction: ${response.status}`);
+  }
+
+  const tx = await response.json();
   return {
-    data: '0x' + codeHex,
-    value: BigInt(0),
-    chainId: txParams.chain_id,
-    nonce: txParams.nonce,
-    gas: BigInt(Math.max(txParams.gas_limit, 1_000_000)),
-    gasPrice: BigInt(txParams.gas_price),
+    to: tx.to as Address,
+    data: tx.data as Hex,
+    value: BigInt(tx.value),
+    chainId: tx.chain_id,
+    nonce: tx.nonce,
+    gas: BigInt(tx.gas_limit),
+    gasPrice: tx.gas_price ? BigInt(tx.gas_price) : undefined,
+    maxFeePerGas: tx.max_fee_per_gas ? BigInt(tx.max_fee_per_gas) : undefined,
+    maxPriorityFeePerGas: tx.max_priority_fee_per_gas ? BigInt(tx.max_priority_fee_per_gas) : undefined,
   };
 }

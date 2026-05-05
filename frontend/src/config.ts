@@ -3,7 +3,7 @@ export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL?.replace('localhost'
 
 export type NetworkKey = 'bradbury' | 'studionet';
 
-export const DEFAULT_NETWORK: NetworkKey = 'bradbury';
+export const DEFAULT_NETWORK: NetworkKey = 'studionet';
 
 export const NETWORK_CONFIG: Record<NetworkKey, { label: string; chainId: number; rpcUrl: string }> = {
   bradbury: {

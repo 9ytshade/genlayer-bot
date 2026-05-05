@@ -12,9 +12,9 @@ export default function Home() {
   const suggestions = ['[wallet]', '[deploy]', '[simulate]', '[gas]'];
 
   return (
-    <main className="relative h-screen w-screen overflow-hidden bg-bg-base flex items-center justify-center noise-bg">
-      <div className="w-full h-full max-w-[1500px] md:p-8 lg:p-12 z-10">
-        <div className="h-full w-full rounded-none md:rounded-lg overflow-hidden border border-border-default bg-bg-surface shadow-2xl">
+    <main className="relative h-dvh w-screen overflow-hidden bg-bg-base flex items-center justify-center noise-bg">
+      <div className="w-full h-full max-w-[1500px] md:p-8 lg:p-12 z-10 min-h-0">
+        <div className="h-full w-full rounded-none md:rounded-lg overflow-hidden border border-border-default bg-bg-surface shadow-2xl flex flex-col min-h-0">
           <div className="h-12 border-b border-border-strong bg-bg-elevated px-6 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <span className="text-[14px] font-display font-medium tracking-wide text-text-primary">GENLAYER</span>
@@ -27,13 +27,13 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="h-[calc(100%-3rem)] w-full grid grid-cols-1 lg:grid-cols-[280px_minmax(0,1fr)_300px]">
+          <div className="flex-1 min-h-0 w-full grid grid-cols-1 lg:grid-cols-[280px_minmax(0,1fr)_300px]">
             {/* Left contacts panel */}
-            <aside className="hidden lg:flex flex-col border-r border-border-default bg-bg-elevated p-6">
+            <aside className="hidden lg:flex min-h-0 flex-col border-r border-border-default bg-bg-elevated p-6">
               <div className="mb-6 rounded-none bg-black border border-border-strong px-4 py-3 text-[10px] uppercase tracking-widest text-text-muted">
                 Connections
               </div>
-              <div className="space-y-3 overflow-y-auto pr-2">
+              <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-2">
                 {leftChats.map((chat) => (
                   <div
                     key={chat.name}
@@ -56,10 +56,10 @@ export default function Home() {
             </section>
 
             {/* Right activity panel */}
-            <aside className="hidden lg:flex flex-col border-l border-border-default bg-bg-elevated p-6 gap-6">
+            <aside className="hidden lg:flex min-h-0 flex-col border-l border-border-default bg-bg-elevated p-6 gap-6 overflow-hidden">
               <LiveLogsPanel />
 
-              <div className="rounded-none border border-border-strong bg-bg-base p-3">
+              <div className="shrink-0 rounded-none border border-border-strong bg-bg-base p-3">
                 <h3 className="text-[10px] uppercase tracking-[0.2em] text-text-secondary mb-2 font-mono">Cmds</h3>
                 <div className="flex flex-wrap gap-2">
                   {suggestions.map((item) => (
