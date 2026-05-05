@@ -5,8 +5,13 @@ import { useWallet } from '../context/WalletContext';
 import { Wallet, LogOut, Copy, Check, AlertCircle, Loader2 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { getWalletBalance } from '../lib/api';
+import type { NetworkKey } from '@/config';
 
-export default function ConnectWalletButton() {
+interface ConnectWalletButtonProps {
+  network: NetworkKey;
+}
+
+export default function ConnectWalletButton({ network }: ConnectWalletButtonProps) {
   const { account, isConnected, isConnecting, error, connect, disconnect } = useWallet();
   const [isOpen, setIsOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -54,7 +59,7 @@ export default function ConnectWalletButton() {
       setBalanceError(null);
 
       try {
-        const data = await getWalletBalance(account);
+        const data = await getWalletBalance(account, network);
         setBalance(data.balance);
       } catch (err) {
         console.error(err);
@@ -66,7 +71,7 @@ export default function ConnectWalletButton() {
     };
 
     fetchBalance();
-  }, [account, isConnected]);
+  }, [account, isConnected, network]);
 
   if (isConnecting) {
     return (

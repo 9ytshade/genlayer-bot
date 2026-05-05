@@ -5,12 +5,14 @@ from dotenv import load_dotenv
 
 try:
     from ..genlayer_client import get_balance as fetch_balance, send_transfer
+    from ..network_config import normalize_network
     from ..database import get_db
     from ..models import User
     from ..schemas import FundWalletRequest, TransactionResponse
 except ImportError:
     # Fallback when running from inside backend directory.
     from genlayer_client import get_balance as fetch_balance, send_transfer
+    from network_config import normalize_network
     from database import get_db
     from models import User
     from schemas import FundWalletRequest, TransactionResponse
@@ -31,9 +33,13 @@ def get_current_user(authorization: str = Header(None), db: Session = Depends(ge
 router = APIRouter(prefix="/wallet", tags=["wallet"])
 
 @router.get("/balance")
-def get_balance(address: str | None = Query(default=None)):
+def get_balance(address: str | None = Query(default=None), network: str | None = Query(default=None)):
     wallet_address = address or os.getenv("WALLET_ADDRESS", "0x0")
-    balance = fetch_balance(wallet_address)
+    try:
+        selected_network = normalize_network(network)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    balance = fetch_balance(wallet_address, network=selected_network)
     return {"address": wallet_address, "balance": balance, "token": "GEN"}
 
 @router.post("/fund", response_model=TransactionResponse)

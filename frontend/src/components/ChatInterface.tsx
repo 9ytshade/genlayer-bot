@@ -9,6 +9,7 @@ import { MessageData, sendMessage, confirmAction, buildTransferTx, buildDeployTx
 import { Send, Bot, Loader2, Command, FileText } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useWallet } from '@/context/WalletContext';
+import { DEFAULT_NETWORK, NETWORK_CONFIG, type NetworkKey } from '@/config';
 
 export default function ChatInterface() {
   const [messages, setMessages] = useState<MessageData[]>([{
@@ -21,6 +22,7 @@ export default function ChatInterface() {
   const [isLoading, setIsLoading] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
   const { account: connectedWallet } = useWallet();
+  const [selectedNetwork, setSelectedNetwork] = useState<NetworkKey>(DEFAULT_NETWORK);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [recentCommands, setRecentCommands] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -66,7 +68,7 @@ export default function ChatInterface() {
       setIsLoading(true);
 
       try {
-        const response = await sendMessage(deployCmd, connectedWallet ?? undefined);
+        const response = await sendMessage(deployCmd, connectedWallet ?? undefined, selectedNetwork);
         const botMsg: MessageData = {
           id: (Date.now() + 1).toString(),
           role: 'bot',
@@ -104,7 +106,7 @@ export default function ChatInterface() {
     setIsLoading(true);
 
     try {
-      const response = await sendMessage(userMsg.content, connectedWallet ?? undefined);
+      const response = await sendMessage(userMsg.content, connectedWallet ?? undefined, selectedNetwork);
       const botMsg: MessageData = {
         id: (Date.now() + 1).toString(),
         role: 'bot',
@@ -145,22 +147,36 @@ export default function ChatInterface() {
 
       // For transfers and deployments, sign the transaction with the user's wallet
       if (intent.action === 'transfer') {
-        const txData = await buildTransferTx(intent.recipient, intent.amount, connectedWallet);
+        if (!intent.recipient || typeof intent.amount !== 'number') {
+          throw new Error('Transfer intent is missing recipient or amount.');
+        }
+        const txData = await buildTransferTx(intent.recipient, intent.amount, connectedWallet as string, selectedNetwork);
         signedTx = await signTransaction({
           to: txData.to,
           value: txData.value,
           data: txData.data,
+          chainId: txData.chainId,
+          nonce: txData.nonce,
+          gas: txData.gas,
+          gasPrice: txData.gasPrice,
         });
       } else if (intent.action === 'deploy_contract') {
-        const txData = await buildDeployTx(intent.code, connectedWallet);
+        if (!intent.code) {
+          throw new Error('Deployment intent is missing contract code.');
+        }
+        const txData = await buildDeployTx(intent.code, connectedWallet as string, selectedNetwork);
         signedTx = await signTransaction({
           to: undefined,
           data: txData.data,
           value: txData.value,
+          chainId: txData.chainId,
+          nonce: txData.nonce,
+          gas: txData.gas,
+          gasPrice: txData.gasPrice,
         });
       }
 
-      const result = await confirmAction(intent, connectedWallet, signedTx);
+      const result = await confirmAction(intent, connectedWallet, signedTx, selectedNetwork);
       setMessages(prev => prev.map(m => 
         m.id === msgId ? { 
           ...m, 
@@ -211,7 +227,24 @@ export default function ChatInterface() {
           </div>
         </div>
         
-        <ConnectWalletButton />
+         <div className="flex items-center gap-2">
+           <label htmlFor="network-select" className="text-[10px] uppercase tracking-widest text-text-muted font-mono">
+             Network
+           </label>
+           <select
+             id="network-select"
+             value={selectedNetwork}
+             onChange={(e) => setSelectedNetwork(e.target.value as NetworkKey)}
+             className="bg-black border border-border-strong px-2 py-1 text-[11px] font-mono text-text-secondary focus:outline-none focus:border-accent-primary"
+           >
+             {Object.entries(NETWORK_CONFIG).map(([key, cfg]) => (
+               <option key={key} value={key}>
+                 {cfg.label}
+               </option>
+             ))}
+           </select>
+           <ConnectWalletButton network={selectedNetwork} />
+         </div>
       </div>
 
       {/* Chat Area */}
@@ -234,9 +267,14 @@ export default function ChatInterface() {
             animate={{ opacity: 1, y: 0 }}
             className="space-y-6"
           >
-            <QuickActions onSelectAction={handleQuickAction} />
-          </motion.div>
-        )}
+             <QuickActions onSelectAction={handleQuickAction} />
+           </motion.div>
+         )}
+         {connectedWallet && (
+           <div className="text-[10px] uppercase tracking-widest text-text-muted font-mono">
+             Active network: {NETWORK_CONFIG[selectedNetwork].label}
+           </div>
+         )}
         
         <AnimatePresence initial={false}>
           {messages.map(msg => (
