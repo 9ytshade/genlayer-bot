@@ -3,21 +3,15 @@ import { Intent } from '../lib/api';
 import { TerminalSquare, Send, Wallet, FileCode } from 'lucide-react';
 import RiskIndicator from './RiskIndicator';
 
+const ACTION_ICON = {
+  transfer: Send,
+  check_balance: Wallet,
+  deploy_contract: FileCode,
+  unknown: TerminalSquare,
+} as const;
+
 export default function IntentCard({ intent }: { intent: Intent }) {
   if (intent.action === 'unknown') return null;
-
-  const getActionIcon = () => {
-    switch (intent.action) {
-      case 'transfer':
-        return Send;
-      case 'check_balance':
-        return Wallet;
-      case 'create_contract':
-        return FileCode;
-      default:
-        return TerminalSquare;
-    }
-  };
 
   const getActionLabel = () => {
     switch (intent.action) {
@@ -25,14 +19,14 @@ export default function IntentCard({ intent }: { intent: Intent }) {
         return 'TRANSFER';
       case 'check_balance':
         return 'BALANCE_CHECK';
-      case 'create_contract':
+      case 'deploy_contract':
         return 'CONTRACT_CREATION';
       default:
         return intent.action.toUpperCase();
     }
   };
 
-  const ActionIcon = getActionIcon();
+  const ActionIcon = ACTION_ICON[intent.action] ?? TerminalSquare;
 
   return (
     <div className="mt-2 p-4 bg-black text-text-primary ticket-border font-mono text-[11px] uppercase tracking-wider">

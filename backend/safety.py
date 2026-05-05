@@ -2,7 +2,7 @@ import os
 from typing import Any
 from web3 import Web3
 
-SUPPORTED_ACTIONS = {"transfer", "check_balance", "create_contract", "unknown"}
+SUPPORTED_ACTIONS = {"transfer", "check_balance", "deploy_contract", "create_contract", "unknown"}
 
 
 def normalize_intent(raw_intent: dict[str, Any]) -> dict[str, Any]:
@@ -27,7 +27,8 @@ def normalize_intent(raw_intent: dict[str, Any]) -> dict[str, Any]:
         recipient = raw_intent.get("recipient")
         intent["recipient"] = str(recipient).strip() if recipient is not None else None
 
-    elif action == "create_contract":
+    elif action in {"create_contract", "deploy_contract"}:
+        intent["action"] = "deploy_contract"
         intent["contract_type"] = str(raw_intent.get("contract_type", "custom")).strip().lower()
         intent["logic_description"] = str(raw_intent.get("logic_description", "")).strip()
         intent["condition"] = str(raw_intent.get("condition", "")).strip()
@@ -75,7 +76,7 @@ def validate_intent(intent: dict[str, Any]) -> tuple[bool, str]:
         if recipient == "0x0000000000000000000000000000000000000000":
             return False, "Recipient cannot be the zero address."
             
-    if intent.get("action") == "create_contract":
+    if intent.get("action") == "deploy_contract":
         if not intent.get("logic_description"):
             return False, "Contract logic description is missing."
         

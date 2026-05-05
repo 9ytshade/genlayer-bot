@@ -1,5 +1,5 @@
 export interface Intent {
-  action: 'transfer' | 'check_balance' | 'create_contract' | 'unknown';
+  action: 'transfer' | 'check_balance' | 'deploy_contract' | 'unknown';
   amount?: number;
   token?: string;
   recipient?: string;
@@ -25,6 +25,8 @@ export interface MessageData {
 }
 
 import { API_BASE_URL as API_URL } from '@/config';
+import type { NetworkKey } from '@/config';
+import { parseEther } from 'viem';
 
 export interface WalletBalanceResponse {
   address: string;
@@ -32,7 +34,7 @@ export interface WalletBalanceResponse {
   token: string;
 }
 
-export async function sendMessage(content: string, walletAddress?: string): Promise<Partial<MessageData>> {
+export async function sendMessage(content: string, walletAddress?: string, network?: NetworkKey): Promise<Partial<MessageData>> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
 
@@ -41,9 +43,9 @@ export async function sendMessage(content: string, walletAddress?: string): Prom
       'Content-Type': 'application/json',
     };
 
-    const body = walletAddress 
-      ? { message: content, wallet_address: walletAddress }
-      : { message: content };
+    const body = walletAddress
+      ? { message: content, wallet_address: walletAddress, network }
+      : { message: content, network };
 
     const response = await fetch(`${API_URL}/chat`, {
       method: 'POST',
@@ -73,7 +75,12 @@ export async function sendMessage(content: string, walletAddress?: string): Prom
   }
 }
 
-export async function confirmAction(intent: Intent, walletAddress?: string, signedTransaction?: string): Promise<{ txHash?: string; balance?: number; error?: string }> {
+export async function confirmAction(
+  intent: Intent,
+  walletAddress?: string,
+  signedTransaction?: string,
+  network?: NetworkKey
+): Promise<{ txHash?: string; balance?: number; error?: string }> {
   try {
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
@@ -83,6 +90,7 @@ export async function confirmAction(intent: Intent, walletAddress?: string, sign
       intent,
       ...(walletAddress && { wallet_address: walletAddress }),
       ...(signedTransaction && { signed_transaction: signedTransaction }),
+      ...(network && { network }),
     };
 
     const response = await fetch(`${API_URL}/chat/confirm`, {
@@ -115,10 +123,13 @@ export async function confirmAction(intent: Intent, walletAddress?: string, sign
   }
 }
 
-export async function getWalletBalance(address?: string): Promise<WalletBalanceResponse> {
+export async function getWalletBalance(address?: string, network?: NetworkKey): Promise<WalletBalanceResponse> {
   const url = new URL(`${API_URL}/wallet/balance`);
   if (address) {
     url.searchParams.set('address', address);
+  }
+  if (network) {
+    url.searchParams.set('network', network);
   }
 
   const controller = new AbortController();
@@ -145,12 +156,14 @@ export interface TxParams {
   chain_id: number;
   gas_price: string;
   nonce: number;
+  gas_limit: number;
   rpc_url: string;
 }
 
-export async function getTxParams(address: string): Promise<TxParams> {
+export async function getTxParams(address: string, network: NetworkKey): Promise<TxParams> {
   const url = new URL(`${API_URL}/chat/tx-params`);
   url.searchParams.set('address', address);
+  url.searchParams.set('network', network);
 
   try {
     const response = await fetch(url.toString());
@@ -166,42 +179,56 @@ export async function getTxParams(address: string): Promise<TxParams> {
 
 export interface TransferTxData {
   to: string;
-  value: string;
+  value: bigint;
   data: string;
+  chainId: number;
+  nonce: number;
+  gas: bigint;
+  gasPrice: bigint;
 }
 
 export interface DeployTxData {
   data: string;
-  value: string;
+  value: bigint;
+  chainId: number;
+  nonce: number;
+  gas: bigint;
+  gasPrice: bigint;
 }
 
 export async function buildTransferTx(
   recipient: string,
   amount: number,
-  walletAddress: string
+  walletAddress: string,
+  network: NetworkKey
 ): Promise<TransferTxData> {
-  const txParams = await getTxParams(walletAddress);
-  
-  const valueInWei = BigInt(amount * 1e18).toString(16);
-  
+  const txParams = await getTxParams(walletAddress, network);
+
   return {
     to: recipient,
-    value: '0x' + valueInWei,
+    value: parseEther(amount.toString()),
     data: '0x',
+    chainId: txParams.chain_id,
+    nonce: txParams.nonce,
+    gas: BigInt(txParams.gas_limit),
+    gasPrice: BigInt(txParams.gas_price),
   };
 }
 
 export async function buildDeployTx(
   code: string,
-  walletAddress: string
+  walletAddress: string,
+  network: NetworkKey
 ): Promise<DeployTxData> {
-  await getTxParams(walletAddress);
-  
+  const txParams = await getTxParams(walletAddress, network);
   const codeHex = Buffer.from(code).toString('hex');
-  
+
   return {
     data: '0x' + codeHex,
-    value: '0x0',
+    value: BigInt(0),
+    chainId: txParams.chain_id,
+    nonce: txParams.nonce,
+    gas: BigInt(Math.max(txParams.gas_limit, 1_000_000)),
+    gasPrice: BigInt(txParams.gas_price),
   };
 }
-

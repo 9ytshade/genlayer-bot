@@ -4,17 +4,17 @@ from dotenv import load_dotenv
 from genlayer_py import create_account
 from web3 import Web3
 import httpx
+try:
+    from .network_config import get_network_config
+except ImportError:
+    from network_config import get_network_config
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
 
 class GenLayerClientWrapper:
-    def __init__(self, private_key: str = None):
-        rpc_url = os.getenv("GENLAYER_RPC_URL")
+    def __init__(self, private_key: str = None, network: str | None = None):
+        self.network, rpc_url, chain_id = get_network_config(network)
         self.private_key = private_key or os.getenv("WALLET_PRIVATE_KEY")
-        chain_id = int(os.getenv("GENLAYER_CHAIN_ID", "4221"))
-        
-        if not rpc_url:
-            raise ValueError("GENLAYER_RPC_URL not found in environment variables")
 
         self.rpc_url = rpc_url
         self.chain_id = chain_id
@@ -149,20 +149,27 @@ class GenLayerClientWrapper:
         )
 
 _client_wrapper = None
+_network_clients = {}
 
-def get_client(private_key: str = None):
+def get_client(private_key: str = None, network: str | None = None):
     global _client_wrapper
+    global _network_clients
     if private_key:
-        return GenLayerClientWrapper(private_key)
-    if _client_wrapper is None:
-        _client_wrapper = GenLayerClientWrapper()
-    return _client_wrapper
+        return GenLayerClientWrapper(private_key, network=network)
+    if network is None:
+        if _client_wrapper is None:
+            _client_wrapper = GenLayerClientWrapper()
+        return _client_wrapper
 
-def get_balance(address: str, private_key: str = None) -> float:
-    return get_client(private_key).get_balance(address)
+    if network not in _network_clients:
+        _network_clients[network] = GenLayerClientWrapper(network=network)
+    return _network_clients[network]
 
-def send_transfer(to_address: str, amount: float, private_key: str = None) -> str:
-    return get_client(private_key).send_transfer(to_address, amount)
+def get_balance(address: str, private_key: str = None, network: str | None = None) -> float:
+    return get_client(private_key, network=network).get_balance(address)
 
-def deploy_contract(code: str, args: list = [], private_key: str = None) -> str:
-    return get_client(private_key).deploy_contract(code, args)
+def send_transfer(to_address: str, amount: float, private_key: str = None, network: str | None = None) -> str:
+    return get_client(private_key, network=network).send_transfer(to_address, amount)
+
+def deploy_contract(code: str, args: list = [], private_key: str = None, network: str | None = None) -> str:
+    return get_client(private_key, network=network).deploy_contract(code, args)

@@ -8,11 +8,13 @@ try:
     from ..safety import validate_intent, normalize_intent
     from ..simulator import simulate_intent
     from ..genlayer_client import send_transfer, get_balance, deploy_contract
+    from ..network_config import normalize_network
 except ImportError:
     from intent_parser import parse_intent
     from safety import validate_intent, normalize_intent
     from simulator import simulate_intent
     from genlayer_client import send_transfer, get_balance, deploy_contract
+    from network_config import normalize_network
 
 try:
     from ..logs_store import logs_store
@@ -24,17 +26,20 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 class ChatRequest(BaseModel):
     message: str
     wallet_address: str | None = None
+    network: str | None = None
 
 class ConfirmRequest(BaseModel):
     intent: dict
     wallet_address: str | None = None
     signed_transaction: str | None = None  # Pre-signed raw transaction from user wallet
+    network: str | None = None
 
 
 class TxParamsResponse(BaseModel):
     chain_id: int
     gas_price: str  # In hex
     nonce: int
+    gas_limit: int
     rpc_url: str
 
 
@@ -62,9 +67,22 @@ def get_private_key_or_raise() -> str:
         raise HTTPException(status_code=500, detail="Server wallet private key is not configured")
     return private_key
 
+
+def resolve_network_or_400(network: str | None) -> str:
+    try:
+        return normalize_network(network)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
 @router.post("")
 async def handle_chat(request: ChatRequest):
-    await logs_store.append("INFO", "CHAT_RECEIVED", "User message received.", {"message": request.message, "wallet_address": request.wallet_address})
+    network = resolve_network_or_400(request.network)
+    await logs_store.append(
+        "INFO",
+        "CHAT_RECEIVED",
+        "User message received.",
+        {"message": request.message, "wallet_address": request.wallet_address, "network": network},
+    )
 
     intent = normalize_intent(parse_intent(request.message))
     
@@ -128,7 +146,8 @@ async def handle_chat(request: ChatRequest):
 @router.post("/confirm")
 async def confirm_action(request: ConfirmRequest, authorization: str | None = Header(None)):
     intent = normalize_intent(request.intent)
-    await logs_store.append("INFO", "CONFIRM_RECEIVED", "Execution confirmed by user.", {"intent": intent})
+    network = resolve_network_or_400(request.network)
+    await logs_store.append("INFO", "CONFIRM_RECEIVED", "Execution confirmed by user.", {"intent": intent, "network": network})
 
     is_safe, error_msg = validate_intent(intent)
     if intent.get("action") != "check_balance" and not is_safe:
@@ -138,7 +157,7 @@ async def confirm_action(request: ConfirmRequest, authorization: str | None = He
     if intent["action"] == "check_balance":
         balance_address = resolve_balance_address(request.wallet_address or get_wallet_address(authorization))
         try:
-            balance = get_balance(balance_address)
+            balance = get_balance(balance_address, network=network)
             await logs_store.append("SUCCESS", "BALANCE_SUCCESS", "Balance read succeeded.", {"balance": balance})
             return {"balance": balance}
         except Exception as e:
@@ -150,7 +169,7 @@ async def confirm_action(request: ConfirmRequest, authorization: str | None = He
             raise HTTPException(status_code=400, detail="Transfer requires signed_transaction from user wallet")
         try:
             from ..genlayer_client import get_client
-            client = get_client()
+            client = get_client(network=network)
             tx_hash = client._rpc_call("eth_sendRawTransaction", [request.signed_transaction])
             client._wait_for_receipt_or_raise(tx_hash)
             await logs_store.append("SUCCESS", "TRANSFER_SUCCESS", "Transfer broadcast succeeded.", {"txHash": tx_hash})
@@ -167,7 +186,7 @@ async def confirm_action(request: ConfirmRequest, authorization: str | None = He
             await logs_store.append("INFO", "DEPLOY_COMPILING", "Compiling intelligent contract code...")
             await logs_store.append("INFO", "DEPLOY_ESTIMATING", "Estimating gas for deployment...")
             from ..genlayer_client import get_client
-            client = get_client()
+            client = get_client(network=network)
             tx_hash = client._rpc_call("eth_sendRawTransaction", [request.signed_transaction])
             client._wait_for_receipt_or_raise(tx_hash)
             await logs_store.append("SUCCESS", "DEPLOY_SUCCESS", "Contract successfully deployed!", {"txHash": tx_hash})
@@ -181,11 +200,12 @@ async def confirm_action(request: ConfirmRequest, authorization: str | None = He
 
 
 @router.get("/tx-params")
-async def get_tx_params(address: str = Query(...)) -> TxParamsResponse:
+async def get_tx_params(address: str = Query(...), network: str | None = Query(default=None)) -> TxParamsResponse:
     """Get transaction parameters needed for client-side signing"""
     try:
         from ..genlayer_client import get_client
-        client = get_client()
+        selected_network = resolve_network_or_400(network)
+        client = get_client(network=selected_network)
         checksum_address = Web3.to_checksum_address(address)
 
         # Get current nonce
@@ -195,15 +215,15 @@ async def get_tx_params(address: str = Query(...)) -> TxParamsResponse:
         # Get gas price
         gas_price_hex = client._rpc_call("eth_gasPrice", [])
         
-        rpc_url = os.getenv("GENLAYER_RPC_URL", "http://localhost:8545")
-        chain_id = int(os.getenv("GENLAYER_CHAIN_ID", "4221"))
+        rpc_url = client.rpc_url
+        chain_id = client.chain_id
         
         return TxParamsResponse(
             chain_id=chain_id,
             gas_price=gas_price_hex,
             nonce=nonce,
+            gas_limit=21000,
             rpc_url=rpc_url
         )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Failed to get transaction parameters: {str(e)}")
-
