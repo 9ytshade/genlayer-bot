@@ -196,7 +196,43 @@ npm run dev
 
 ---
 
-## 📖 Usage Guide
+## � Railway Deployment
+
+This repo includes Railway-friendly startup files for backend and frontend deployment.
+
+### Backend
+- `backend/Procfile` starts the FastAPI app via Uvicorn
+- Railway will use `PORT` for the listening port
+- Backend env vars should include:
+  - `GENLAYER_RPC_URL`
+  - `GENLAYER_CHAIN_ID`
+  - `WALLET_PRIVATE_KEY`
+  - `WALLET_ADDRESS`
+  - `DATABASE_URL`
+  - `GROQ_API_KEY`
+  - `ENCRYPTION_KEY`
+
+### Frontend
+- `frontend/Procfile` starts Next.js with `npm run start`
+- Configure Railway env vars for the frontend build:
+  - `NEXT_PUBLIC_API_URL` → your Railway backend URL
+  - `NEXT_PUBLIC_GENLAYER_RPC_URL_BRADBURY`
+  - `NEXT_PUBLIC_GENLAYER_CHAIN_ID_BRADBURY`
+  - `NEXT_PUBLIC_GENLAYER_RPC_URL_STUDIONET`
+  - `NEXT_PUBLIC_GENLAYER_CHAIN_ID_STUDIONET`
+  - `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID`
+
+### Railway backend service
+- `railway.json` is now configured as a root-level backend-only Railway service definition.
+- Deploying this project on Railway will start the backend from `backend/` and expose a public backend URL.
+- Use that URL in your frontend environment via `NEXT_PUBLIC_API_URL`.
+
+### Optional frontend deployment
+- `frontend/Procfile` is still available if you want to deploy the frontend separately on Railway or another host.
+
+---
+
+## �📖 Usage Guide
 
 ### Basic Operations
 
