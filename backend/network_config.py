@@ -1,5 +1,9 @@
 import os
 
+# Supported networks: "studionet" (default), "bradbury"
+# When network=None is passed to get_network_config(), it resolves to "studionet".
+# Set GENLAYER_RPC_URL_STUDIONET or GENLAYER_RPC_URL_BRADBURY in your environment.
+
 SUPPORTED_NETWORKS = ("bradbury", "studionet")
 DEFAULT_NETWORK = "studionet"
 

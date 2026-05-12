@@ -31,5 +31,11 @@ def get_db():
         db.close()
 
 def init_db():
-    """Initialize database tables"""
+    # Import models here to ensure their table definitions are registered
+    # with Base.metadata before create_all is called, regardless of
+    # import order in the application startup sequence.
+    try:
+        from .models import User, PlatformWallet  # noqa: F401
+    except ImportError:
+        from models import User, PlatformWallet  # noqa: F401
     Base.metadata.create_all(bind=engine)

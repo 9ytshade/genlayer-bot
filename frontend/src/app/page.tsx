@@ -2,13 +2,6 @@ import ChatInterface from '@/components/ChatInterface';
 import LiveLogsPanel from '@/components/LiveLogsPanel';
 
 export default function Home() {
-  const leftChats = [
-    { name: '0xDavid', status: 'Online', active: true },
-    { name: 'Deployments', status: '2 active' },
-    { name: 'Simulations', status: 'Last ran 2m ago' },
-    { name: 'Oracle Nodes', status: 'Connected' },
-  ];
-
   const suggestions = ['[wallet]', '[deploy]', '[simulate]', '[gas]'];
 
   return (
@@ -33,20 +26,8 @@ export default function Home() {
               <div className="mb-6 rounded-none bg-black border border-border-strong px-4 py-3 text-[10px] uppercase tracking-widest text-text-muted">
                 Connections
               </div>
-              <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-2">
-                {leftChats.map((chat) => (
-                  <div
-                    key={chat.name}
-                    className={`rounded-none border px-4 py-3 transition-colors ${
-                      chat.active
-                        ? 'bg-accent-primary/10 border-accent-primary/50'
-                        : 'bg-transparent border-transparent hover:border-border-default'
-                    }`}
-                  >
-                    <div className="text-sm font-medium text-text-primary">{chat.name}</div>
-                    <div className="text-[11px] mt-1 text-text-muted font-mono">{chat.status}</div>
-                  </div>
-                ))}
+              <div className="text-[10px] uppercase tracking-widest text-text-muted font-mono px-4 pt-4">
+                No active connections
               </div>
             </aside>
 

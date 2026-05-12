@@ -24,9 +24,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="GenLayer AI Chatbot API", lifespan=lifespan)
 
+ALLOWED_ORIGINS = [
+    o.strip()
+    for o in os.getenv("ALLOWED_ORIGINS", "localhost:3000").split(",")
+    if o.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Allow localhost:3000
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

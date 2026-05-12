@@ -132,6 +132,8 @@ export async function confirmAction(
   txHash?: string,
   network?: NetworkKey
 ): Promise<{ txHash?: string; consensusTxId?: string; contractAddress?: string; derivedAddresses?: string[]; balance?: number; content?: string; error?: string }> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 65000);
   try {
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
@@ -149,6 +151,7 @@ export async function confirmAction(
       method: 'POST',
       headers,
       body: JSON.stringify(body),
+      signal: controller.signal,
     });
     
     if (!response.ok) {
@@ -172,6 +175,8 @@ export async function confirmAction(
     }
 
     return { error: "Failed to confirm action." };
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 

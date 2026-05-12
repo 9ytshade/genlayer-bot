@@ -5,10 +5,17 @@ from database import Base
 from cryptography.fernet import Fernet
 import os
 
-# Encryption key for sensitive data
-ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", Fernet.generate_key().decode())
+_raw_key = os.getenv("ENCRYPTION_KEY")
+if not _raw_key:
+    raise RuntimeError(
+        "ENCRYPTION_KEY environment variable is not set. "
+        "Generate a key with: "
+        "python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
+        " — then set it as a permanent environment variable. "
+        "Never regenerate this key once data has been encrypted with it."
+    )
 
-cipher = Fernet(ENCRYPTION_KEY.encode() if isinstance(ENCRYPTION_KEY, str) else ENCRYPTION_KEY)
+fernet = Fernet(_raw_key.encode())
 
 class User(Base):
     """User model - represents a user connecting their wallet"""
@@ -51,11 +58,11 @@ class PlatformWallet(Base):
 
     def set_private_key(self, private_key: str):
         """Encrypt and store private key"""
-        self.private_key_encrypted = cipher.encrypt(private_key.encode()).decode()
+        self.private_key_encrypted = fernet.encrypt(private_key.encode()).decode()
 
     def get_private_key(self) -> str:
         """Decrypt and retrieve private key"""
-        return cipher.decrypt(self.private_key_encrypted.encode()).decode()
+        return fernet.decrypt(self.private_key_encrypted.encode()).decode()
 
     def to_dict(self, include_private_key=False):
         data = {

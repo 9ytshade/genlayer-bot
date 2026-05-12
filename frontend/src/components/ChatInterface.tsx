@@ -230,7 +230,19 @@ export default function ChatInterface() {
       };
       setMessages(prev => [...prev, botMsg]);
     } catch (error) {
-      console.error(error);
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Failed to reach the server. Please try again.';
+      setMessages(prev => [
+        ...prev,
+        {
+          id: (Date.now() + 1).toString(),
+          role: 'bot',
+          content: message,
+          status: 'error',
+        },
+      ]);
     } finally {
       setIsLoading(false);
     }

@@ -9,14 +9,14 @@ try:
     from ..contract_validation import validate_python_contract
     from ..safety import validate_intent, normalize_intent
     from ..simulator import simulate_intent
-    from ..genlayer_client import send_transfer, get_balance, deploy_contract, get_client
+    from ..genlayer_client import send_transfer, get_balance, get_client
     from ..network_config import normalize_network
 except ImportError:
     from intent_parser import parse_intent
     from contract_validation import validate_python_contract
     from safety import validate_intent, normalize_intent
     from simulator import simulate_intent
-    from genlayer_client import send_transfer, get_balance, deploy_contract, get_client
+    from genlayer_client import send_transfer, get_balance, get_client
     from network_config import normalize_network
 
 try:
@@ -210,7 +210,7 @@ async def confirm_action(request: ConfirmRequest, authorization: str | None = He
     if intent["action"] == "check_balance":
         balance_address = resolve_balance_address(request.wallet_address or get_wallet_address(authorization))
         try:
-            balance = get_balance(balance_address, network=network)
+            balance = await get_balance(balance_address, network=network)
             await logs_store.append("SUCCESS", "BALANCE_SUCCESS", "Balance read succeeded.", {"balance": balance})
             return {"balance": balance}
         except Exception as e:
@@ -222,8 +222,8 @@ async def confirm_action(request: ConfirmRequest, authorization: str | None = He
             raise HTTPException(status_code=400, detail="Transfer requires tx_hash or signed_transaction from user wallet")
         try:
             client = get_client(network=network)
-            tx_hash = request.tx_hash or client._rpc_call("eth_sendRawTransaction", [request.signed_transaction])
-            client._wait_for_receipt_or_raise(tx_hash)
+            tx_hash = request.tx_hash or await client._rpc_call("eth_sendRawTransaction", [request.signed_transaction])
+            await client._wait_for_receipt_or_raise(tx_hash)
             await logs_store.append("SUCCESS", "TRANSFER_SUCCESS", "Transfer broadcast succeeded.", {"txHash": tx_hash})
             return {"txHash": tx_hash}
         except Exception as e:
@@ -238,10 +238,10 @@ async def confirm_action(request: ConfirmRequest, authorization: str | None = He
             await logs_store.append("INFO", "DEPLOY_COMPILING", "Compiling intelligent contract code...")
             await logs_store.append("INFO", "DEPLOY_ESTIMATING", "Estimating gas for deployment...")
             client = get_client(network=network)
-            tx_hash = request.tx_hash or client._rpc_call("eth_sendRawTransaction", [request.signed_transaction])
-            client._wait_for_receipt_or_raise(tx_hash)
-            consensus_tx_id = client.get_consensus_transaction_id(tx_hash)
-            deployment_details = client.get_deployment_details(consensus_tx_id)
+            tx_hash = request.tx_hash or await client._rpc_call("eth_sendRawTransaction", [request.signed_transaction])
+            await client._wait_for_receipt_or_raise(tx_hash)
+            consensus_tx_id = await client.get_consensus_transaction_id(tx_hash)
+            deployment_details = await client.get_deployment_details(consensus_tx_id)
             await logs_store.append(
                 "SUCCESS",
                 "DEPLOY_SUCCESS",
@@ -292,7 +292,7 @@ async def build_deploy_tx(request: DeployTxRequest) -> DeployTxResponse:
                 "valueWei": str(value),
             },
         )
-        tx = client.build_deploy_transaction(
+        tx = await client.build_deploy_transaction(
             sender_address=checksum_address,
             code=request.code,
             args=request.constructor_args,
@@ -340,11 +340,11 @@ async def get_tx_params(address: str = Query(...), network: str | None = Query(d
         checksum_address = Web3.to_checksum_address(address)
 
         # Get current nonce
-        nonce_hex = client._rpc_call("eth_getTransactionCount", [checksum_address, "pending"])
+        nonce_hex = await client._rpc_call("eth_getTransactionCount", [checksum_address, "pending"])
         nonce = int(nonce_hex, 16)
         
         # Get gas price
-        gas_price_hex = client._rpc_call("eth_gasPrice", [])
+        gas_price_hex = await client._rpc_call("eth_gasPrice", [])
         
         rpc_url = client.rpc_url
         chain_id = client.chain_id

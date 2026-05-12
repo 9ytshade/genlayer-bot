@@ -33,17 +33,17 @@ def get_current_user(authorization: str = Header(None), db: Session = Depends(ge
 router = APIRouter(prefix="/wallet", tags=["wallet"])
 
 @router.get("/balance")
-def get_balance(address: str | None = Query(default=None), network: str | None = Query(default=None)):
+async def get_balance(address: str | None = Query(default=None), network: str | None = Query(default=None)):
     wallet_address = address or os.getenv("WALLET_ADDRESS", "0x0")
     try:
         selected_network = normalize_network(network)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    balance = fetch_balance(wallet_address, network=selected_network)
+    balance = await fetch_balance(wallet_address, network=selected_network)
     return {"address": wallet_address, "balance": balance, "token": "GEN"}
 
 @router.post("/fund", response_model=TransactionResponse)
-def fund_platform_wallet(
+async def fund_platform_wallet(
     request: FundWalletRequest,
     authorization: str = Header(None),
     db: Session = Depends(get_db)
@@ -69,7 +69,7 @@ def fund_platform_wallet(
             raise HTTPException(status_code=500, detail="Admin wallet not configured")
         
         # Send transfer from admin wallet to platform wallet
-        tx_hash = send_transfer(
+        tx_hash = await send_transfer(
             to_address=platform_wallet.address,
             amount=request.amount,
             private_key=admin_private_key

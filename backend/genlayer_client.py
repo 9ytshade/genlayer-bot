@@ -1,5 +1,5 @@
 import os
-import time
+import asyncio
 import re
 from dotenv import load_dotenv
 from genlayer_py import create_account
@@ -30,20 +30,19 @@ class GenLayerClientWrapper:
         self.receipt_timeout_sec = int(os.getenv("TX_RECEIPT_TIMEOUT_SEC", "45"))
         self.receipt_poll_interval_sec = float(os.getenv("TX_RECEIPT_POLL_INTERVAL_SEC", "1.5"))
 
-    def _rpc_call(self, method: str, params: list):
+    async def _rpc_call(self, method: str, params: list):
         payload = {
             "jsonrpc": "2.0",
             "method": method,
             "params": params,
             "id": 1,
         }
-        response = httpx.post(self.rpc_url, json=payload, timeout=30.0)
+        async with httpx.AsyncClient() as client:
+            response = await client.post(self.rpc_url, json=payload, timeout=30.0)
         response.raise_for_status()
         data = response.json()
-
         if "error" in data and data["error"]:
             raise RuntimeError(data["error"].get("message", str(data["error"])))
-
         return data.get("result")
 
     def _chain_config(self):
@@ -94,7 +93,7 @@ class GenLayerClientWrapper:
         selector = eth_utils.keccak(text=contract_fn.signature)[:4].hex()
         return "0x" + selector + params.hex(), Web3.to_checksum_address(consensus_contract["address"])
 
-    def build_deploy_transaction(
+    async def build_deploy_transaction(
         self,
         sender_address: str,
         code: str,
@@ -104,7 +103,7 @@ class GenLayerClientWrapper:
         gas_limit: int | None = None,
         consensus_max_rotations: int | None = None,
         leader_only: bool = False,
-    ) -> dict:
+        ) -> dict:
         checksum_sender = Web3.to_checksum_address(sender_address)
         encoded_data, consensus_address = self._encode_deploy_contract_data(
             sender_address=checksum_sender,
@@ -114,7 +113,7 @@ class GenLayerClientWrapper:
             consensus_max_rotations=consensus_max_rotations,
             leader_only=leader_only,
         )
-        nonce_hex = self._rpc_call("eth_getTransactionCount", [checksum_sender, "pending"])
+        nonce_hex = await self._rpc_call("eth_getTransactionCount", [checksum_sender, "pending"])
         nonce = int(nonce_hex, 16)
 
         tx_for_estimate = {
@@ -126,23 +125,23 @@ class GenLayerClientWrapper:
 
         fee_fields: dict[str, int] = {}
         try:
-            latest_block = self._rpc_call("eth_getBlockByNumber", ["latest", False])
+            latest_block = await self._rpc_call("eth_getBlockByNumber", ["latest", False])
             base_fee_hex = latest_block.get("baseFeePerGas") if isinstance(latest_block, dict) else None
             if base_fee_hex:
                 base_fee = int(base_fee_hex, 16)
                 try:
-                    priority_hex = self._rpc_call("eth_maxPriorityFeePerGas", [])
+                    priority_hex = await self._rpc_call("eth_maxPriorityFeePerGas", [])
                     priority_fee = int(priority_hex, 16)
                 except Exception:
                     priority_fee = Web3.to_wei(2, "gwei")
                 fee_fields["maxPriorityFeePerGas"] = priority_fee
                 fee_fields["maxFeePerGas"] = base_fee + priority_fee
             else:
-                gas_price_hex = self._rpc_call("eth_gasPrice", [])
+                gas_price_hex = await self._rpc_call("eth_gasPrice", [])
                 fee_fields["gasPrice"] = int(gas_price_hex, 16)
         except Exception:
             try:
-                gas_price_hex = self._rpc_call("eth_gasPrice", [])
+                gas_price_hex = await self._rpc_call("eth_gasPrice", [])
                 fee_fields["gasPrice"] = int(gas_price_hex, 16)
             except Exception:
                 pass
@@ -150,7 +149,7 @@ class GenLayerClientWrapper:
         estimated_gas = gas_limit
         if estimated_gas is None:
             try:
-                gas_hex = self._rpc_call("eth_estimateGas", [{**tx_for_estimate, **{k: hex(v) for k, v in fee_fields.items()}}])
+                gas_hex = await self._rpc_call("eth_estimateGas", [{**tx_for_estimate, **{k: hex(v) for k, v in fee_fields.items()}}])
                 estimated_gas = int(gas_hex, 16)
             except Exception:
                 estimated_gas = 1_500_000
@@ -165,8 +164,8 @@ class GenLayerClientWrapper:
             **fee_fields,
         }
 
-    def get_consensus_transaction_id(self, evm_tx_hash: str) -> str | None:
-        receipt = self._rpc_call("eth_getTransactionReceipt", [evm_tx_hash])
+    async def get_consensus_transaction_id(self, evm_tx_hash: str) -> str | None:
+        receipt = await self._rpc_call("eth_getTransactionReceipt", [evm_tx_hash])
         if not receipt or not receipt.get("logs"):
             return None
 
@@ -192,7 +191,7 @@ class GenLayerClientWrapper:
             for nested_value in value:
                 self._collect_addresses(nested_value, found)
 
-    def get_deployment_details(self, consensus_tx_id: str | None) -> dict:
+    async def get_deployment_details(self, consensus_tx_id: str | None) -> dict:
         if not consensus_tx_id:
             return {"contract_address": None, "derived_addresses": []}
 
@@ -225,10 +224,10 @@ class GenLayerClientWrapper:
         except Exception:
             return {"contract_address": None, "derived_addresses": []}
 
-    def get_balance(self, address: str) -> float:
+    async def get_balance(self, address: str) -> float:
         try:
             checksum_address = Web3.to_checksum_address(address)
-            balance_hex = self._rpc_call("eth_getBalance", [checksum_address, "latest"])
+            balance_hex = await self._rpc_call("eth_getBalance", [checksum_address, "latest"])
             balance_wei = int(balance_hex, 16)
             # GenLayer uses 18 decimals like ETH
             return float(Web3.from_wei(balance_wei, 'ether'))
@@ -236,14 +235,14 @@ class GenLayerClientWrapper:
             print(f"Error fetching balance: {e}")
             return 0.0
 
-    def send_transfer(self, to_address: str, amount: float) -> str:
+    async def send_transfer(self, to_address: str, amount: float) -> str:
         if not self.account or not self.sender_address:
             raise ValueError("Private key is required for sending transfers")
 
         try:
             # Sign locally and broadcast raw transaction to avoid RPC signer requirements.
             checksum_to = Web3.to_checksum_address(to_address)
-            nonce_hex = self._rpc_call("eth_getTransactionCount", [self.sender_address, "pending"])
+            nonce_hex = await self._rpc_call("eth_getTransactionCount", [self.sender_address, "pending"])
             nonce = int(nonce_hex, 16)
             value = Web3.to_wei(amount, "ether")
 
@@ -256,7 +255,7 @@ class GenLayerClientWrapper:
             }
 
             try:
-                gas_hex = self._rpc_call(
+                gas_hex = await self._rpc_call(
                     "eth_estimateGas",
                     [{"from": self.sender_address, "to": checksum_to, "value": hex(value)}],
                 )
@@ -265,71 +264,33 @@ class GenLayerClientWrapper:
                 tx_params["gas"] = 21000
 
             try:
-                gas_price_hex = self._rpc_call("eth_gasPrice", [])
+                gas_price_hex = await self._rpc_call("eth_gasPrice", [])
                 tx_params["gasPrice"] = int(gas_price_hex, 16)
             except Exception:
                 pass
 
             signed = self.account.sign_transaction(tx_params)
             raw_tx = Web3.to_hex(signed.raw_transaction)
-            tx_hash = self._rpc_call("eth_sendRawTransaction", [raw_tx])
-            self._wait_for_receipt_or_raise(tx_hash)
+            tx_hash = await self._rpc_call("eth_sendRawTransaction", [raw_tx])
+            await self._wait_for_receipt_or_raise(tx_hash)
             return tx_hash
         except Exception as e:
             print(f"Error sending transfer: {e}")
             raise e
 
-    def deploy_contract(self, code: str, args: list = []) -> str:
-        if not self.account or not self.sender_address:
-            raise ValueError("Private key is required for contract deployment")
-
-        try:
-            # Get latest nonce
-            nonce_hex = self._rpc_call("eth_getTransactionCount", [self.sender_address, "pending"])
-            nonce = int(nonce_hex, 16)
-
-            # GenLayer deployment transaction
-            tx_params = {
-                "from": self.sender_address,
-                "data": Web3.to_hex(text=code),
-                "nonce": nonce,
-                "chainId": self.chain_id,
-                "value": 0,
-            }
-
-            # Estimate gas for deployment
-            try:
-                gas_hex = self._rpc_call(
-                    "eth_estimateGas",
-                    [{"from": self.sender_address, "data": tx_params["data"]}],
-                )
-                tx_params["gas"] = int(gas_hex, 16)
-            except Exception:
-                tx_params["gas"] = 1000000 # Default for deployment if estimation fails
-
-            # Signed deployment
-            signed = self.account.sign_transaction(tx_params)
-            raw_tx = Web3.to_hex(signed.raw_transaction)
-            tx_hash = self._rpc_call("eth_sendRawTransaction", [raw_tx])
-            
-            # Wait for receipt to ensure it's deployed
-            self._wait_for_receipt_or_raise(tx_hash)
-            return tx_hash
-        except Exception as e:
-            print(f"Error deploying contract: {e}")
-            raise e
-
-    def _wait_for_receipt_or_raise(self, tx_hash: str):
-        deadline = time.time() + self.receipt_timeout_sec
-        while time.time() < deadline:
-            receipt = self._rpc_call("eth_getTransactionReceipt", [tx_hash])
+    async def _wait_for_receipt_or_raise(self, tx_hash: str):
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + self.receipt_timeout_sec
+        while loop.time() < deadline:
+            receipt = await self._rpc_call("eth_getTransactionReceipt", [tx_hash])
             if receipt:
                 status_hex = receipt.get("status")
                 if status_hex in ("0x1", 1):
                     return
-                raise RuntimeError(f"Transaction reverted on-chain. status={status_hex}")
-            time.sleep(self.receipt_poll_interval_sec)
-
+                raise RuntimeError(
+                    f"Transaction reverted on-chain. status={status_hex}"
+                )
+            await asyncio.sleep(self.receipt_poll_interval_sec)
         raise RuntimeError(
             f"Timed out waiting for transaction receipt after {self.receipt_timeout_sec}s"
         )
@@ -351,11 +312,8 @@ def get_client(private_key: str = None, network: str | None = None):
         _network_clients[network] = GenLayerClientWrapper(network=network)
     return _network_clients[network]
 
-def get_balance(address: str, private_key: str = None, network: str | None = None) -> float:
-    return get_client(private_key, network=network).get_balance(address)
+async def get_balance(address: str, private_key: str = None, network: str | None = None) -> float:
+    return await get_client(private_key, network=network).get_balance(address)
 
-def send_transfer(to_address: str, amount: float, private_key: str = None, network: str | None = None) -> str:
-    return get_client(private_key, network=network).send_transfer(to_address, amount)
-
-def deploy_contract(code: str, args: list = [], private_key: str = None, network: str | None = None) -> str:
-    return get_client(private_key, network=network).deploy_contract(code, args)
+async def send_transfer(to_address: str, amount: float, private_key: str = None, network: str | None = None) -> str:
+    return await get_client(private_key, network=network).send_transfer(to_address, amount)
