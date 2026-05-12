@@ -12,7 +12,7 @@ interface ConnectWalletButtonProps {
 }
 
 export default function ConnectWalletButton({ network }: ConnectWalletButtonProps) {
-  const { account, isConnected, isConnecting, error, connect, disconnect } = useWallet();
+  const { account, isConnected, isConnecting, error, connect, disconnect, balanceRefreshNonce } = useWallet();
   const [isOpen, setIsOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [balance, setBalance] = useState<number | null>(null);
@@ -71,7 +71,7 @@ export default function ConnectWalletButton({ network }: ConnectWalletButtonProp
     };
 
     fetchBalance();
-  }, [account, isConnected, network]);
+  }, [account, isConnected, network, balanceRefreshNonce]);
 
   if (isConnecting) {
     return (

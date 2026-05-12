@@ -78,7 +78,7 @@ export default function ChatInterface() {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
-  const { account: connectedWallet } = useWallet();
+  const { account: connectedWallet, sendTransaction, switchNetwork, refreshBalance } = useWallet();
   const [selectedNetwork, setSelectedNetwork] = useState<NetworkKey>(DEFAULT_NETWORK);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [recentCommands, setRecentCommands] = useState<string[]>([]);
@@ -103,6 +103,28 @@ export default function ChatInterface() {
   const isNetworkMismatch = Boolean(
     connectedWallet && chainId && chainId !== NETWORK_CONFIG[selectedNetwork].chainId
   );
+
+  const handleNetworkChange = async (nextNetwork: NetworkKey) => {
+    setSelectedNetwork(nextNetwork);
+    if (!connectedWallet) {
+      return;
+    }
+
+    try {
+      await switchNetwork(NETWORK_CONFIG[nextNetwork].chainId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : `Failed to switch wallet to ${NETWORK_CONFIG[nextNetwork].label}.`;
+      setMessages(prev => [
+        ...prev,
+        {
+          id: (Date.now() + 1).toString(),
+          role: 'bot',
+          content: message,
+          status: 'error',
+        },
+      ]);
+    }
+  };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!connectedWallet || isNetworkMismatch) return;
@@ -248,8 +270,6 @@ export default function ChatInterface() {
     }
   };
 
-  const { sendTransaction } = useWallet();
-
   const handleConfirm = async (msgId: string) => {
     const msg = messages.find(m => m.id === msgId);
     if (!msg || !msg.intent) return;
@@ -319,6 +339,9 @@ export default function ChatInterface() {
       }
 
       const result = await confirmAction(intentForConfirmation, connectedWallet, undefined, txHash, selectedNetwork);
+      if (!result.error) {
+        refreshBalance();
+      }
       setMessages(prev => prev.map(m => 
         m.id === msgId ? { 
           ...m, 
@@ -395,7 +418,9 @@ export default function ChatInterface() {
            <select
              id="network-select"
              value={selectedNetwork}
-             onChange={(e) => setSelectedNetwork(e.target.value as NetworkKey)}
+             onChange={(e) => {
+               void handleNetworkChange(e.target.value as NetworkKey);
+             }}
              className="bg-black border border-border-strong px-2 py-1 text-[11px] font-mono text-text-secondary focus:outline-none focus:border-accent-primary"
            >
              {Object.entries(NETWORK_CONFIG).map(([key, cfg]) => (

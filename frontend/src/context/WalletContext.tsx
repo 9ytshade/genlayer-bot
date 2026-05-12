@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, ReactNode } from 'react';
-import { useAccount, useDisconnect, useWalletClient } from 'wagmi';
+import { useAccount, useDisconnect, useSwitchChain, useWalletClient } from 'wagmi';
 import { useConnectModal } from '@rainbow-me/rainbowkit';
 import type { Address, Hash, Hex } from 'viem';
 
@@ -25,6 +25,9 @@ interface WalletContextType {
   connect: () => Promise<void>;
   disconnect: () => void;
   sendTransaction: (txData: WalletTransactionRequest) => Promise<Hash>;
+  switchNetwork: (chainId: number) => Promise<void>;
+  balanceRefreshNonce: number;
+  refreshBalance: () => void;
 }
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
@@ -32,8 +35,10 @@ const WalletContext = createContext<WalletContextType | undefined>(undefined);
 export function WalletProvider({ children }: { children: ReactNode }) {
   const { address, isConnected } = useAccount();
   const { disconnect: wagmiDisconnect } = useDisconnect();
+  const { switchChainAsync } = useSwitchChain();
   const { openConnectModal } = useConnectModal();
   const [error, setError] = useState<string | null>(null);
+  const [balanceRefreshNonce, setBalanceRefreshNonce] = useState(0);
 
   const account = address ?? null;
   const { data: walletClient } = useWalletClient();
@@ -49,6 +54,26 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   const disconnect = () => {
     wagmiDisconnect();
+  };
+
+  const refreshBalance = () => {
+    setBalanceRefreshNonce((value) => value + 1);
+  };
+
+  const switchNetwork = async (chainId: number) => {
+    setError(null);
+    if (!switchChainAsync) {
+      throw new Error('Wallet does not support automatic network switching.');
+    }
+
+    try {
+      await switchChainAsync({ chainId });
+      refreshBalance();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to switch network';
+      setError(message);
+      throw err;
+    }
   };
 
   const sendTransaction = async (txData: WalletTransactionRequest): Promise<Hash> => {
@@ -95,7 +120,20 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <WalletContext.Provider value={{ account, isConnected, isConnecting: false, error, connect, disconnect, sendTransaction }}>
+    <WalletContext.Provider
+      value={{
+        account,
+        isConnected,
+        isConnecting: false,
+        error,
+        connect,
+        disconnect,
+        sendTransaction,
+        switchNetwork,
+        balanceRefreshNonce,
+        refreshBalance,
+      }}
+    >
       {children}
     </WalletContext.Provider>
   );
