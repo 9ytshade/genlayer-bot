@@ -238,15 +238,11 @@ class GenLayerClientWrapper:
             return {"contract_address": None, "derived_addresses": []}
 
     async def get_balance(self, address: str) -> float:
-        try:
-            checksum_address = Web3.to_checksum_address(address)
-            balance_hex = await self._rpc_call("eth_getBalance", [checksum_address, "latest"])
-            balance_wei = int(balance_hex, 16)
-            # GenLayer uses 18 decimals like ETH
-            return float(Web3.from_wei(balance_wei, 'ether'))
-        except Exception as e:
-            print(f"Error fetching balance: {e}")
-            return 0.0
+        checksum_address = Web3.to_checksum_address(address)
+        balance_hex = await self._rpc_call("eth_getBalance", [checksum_address, "latest"])
+        balance_wei = int(balance_hex, 16)
+        # GenLayer uses 18 decimals like ETH
+        return float(Web3.from_wei(balance_wei, 'ether'))
 
     async def send_transfer(self, to_address: str, amount: float) -> str:
         if not self.account or not self.sender_address:

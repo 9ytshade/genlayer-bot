@@ -38,4 +38,7 @@ def get_network_config(network: str | None) -> tuple[str, str, int]:
             "Set GENLAYER_RPC_URL_BRADBURY/GENLAYER_RPC_URL_STUDIONET."
         )
 
+    if not rpc_url.startswith(("http://", "https://")):
+        rpc_url = f"https://{rpc_url}"
+
     return normalized, rpc_url, chain_id
