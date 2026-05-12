@@ -9,7 +9,6 @@ import eth_utils
 from eth_abi import encode as abi_encode
 from genlayer_py.abi import calldata
 from genlayer_py.abi.transactions import serialize
-from genlayer_py.contracts.utils import make_calldata_object
 from web3.constants import ADDRESS_ZERO
 try:
     from .network_config import get_network_config
@@ -17,6 +16,20 @@ except ImportError:
     from network_config import get_network_config
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
+
+def make_calldata_object(
+    method: str | None = None,
+    args: list | None = None,
+    kwargs: dict | None = None,
+):
+    ret = {}
+    if method is not None:
+        ret["method"] = method
+    if args is not None and len(args) > 0:
+        ret["args"] = args
+    if kwargs is not None and isinstance(kwargs, dict) and kwargs:
+        ret["kwargs"] = kwargs
+    return ret
 
 class GenLayerClientWrapper:
     def __init__(self, private_key: str = None, network: str | None = None):
