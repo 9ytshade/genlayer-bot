@@ -20,17 +20,7 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="flex-1 min-h-0 w-full grid grid-cols-1 lg:grid-cols-[280px_minmax(0,1fr)_300px]">
-            {/* Left contacts panel */}
-            <aside className="hidden lg:flex min-h-0 flex-col border-r border-border-default bg-bg-elevated p-6">
-              <div className="mb-6 rounded-none bg-black border border-border-strong px-4 py-3 text-[10px] uppercase tracking-widest text-text-muted">
-                Connections
-              </div>
-              <div className="text-[10px] uppercase tracking-widest text-text-muted font-mono px-4 pt-4">
-                No active connections
-              </div>
-            </aside>
-
+          <div className="flex-1 min-h-0 w-full grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_300px]">
             {/* Center chat */}
             <section className="min-w-0 bg-bg-base h-full flex flex-col overflow-hidden">
               <ChatInterface />

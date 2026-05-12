@@ -7,7 +7,7 @@ import CommandPalette from './CommandPalette';
 import ConnectWalletButton from './ConnectWalletButton';
 import type { Intent } from '../lib/api';
 import { MessageData, sendMessage, confirmAction, buildTransferTx, buildDeployTx, validateContractFile } from '../lib/api';
-import { Send, Bot, Loader2, Command, FileText, History, Plus, MessageSquare } from 'lucide-react';
+import { Send, Bot, Loader2, Command, FileText, Plus, MessageSquare } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useWallet } from '@/context/WalletContext';
 import { useChainId } from 'wagmi';
@@ -136,7 +136,6 @@ export default function ChatInterface() {
   const { account: connectedWallet, sendTransaction, switchNetwork, refreshBalance } = useWallet();
   const [selectedNetwork, setSelectedNetwork] = useState<NetworkKey>(DEFAULT_NETWORK);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
-  const [historyOpen, setHistoryOpen] = useState(false);
   const [recentCommands, setRecentCommands] = useState<string[]>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -269,12 +268,10 @@ export default function ChatInterface() {
     setCurrentChatId(nextChat.id);
     setInput('');
     setUploadError(null);
-    setHistoryOpen(false);
   };
 
   const handleSelectChat = (chatId: string) => {
     setCurrentChatId(chatId);
-    setHistoryOpen(false);
     setUploadError(null);
   };
 
@@ -553,8 +550,64 @@ export default function ChatInterface() {
   if (!isMounted) return null;
 
   return (
-    <div className="flex flex-col h-full min-h-0 w-full mx-auto overflow-hidden bg-bg-base border-none md:border-x border-border-default relative">
-      
+    <div className="flex h-full min-h-0 w-full mx-auto overflow-hidden bg-bg-base border-none md:border-x border-border-default relative">
+      <aside className="hidden lg:flex w-[280px] min-h-0 shrink-0 flex-col border-r border-border-default bg-bg-elevated">
+        <div className="border-b border-border-strong p-4">
+          <button
+            type="button"
+            onClick={handleCreateNewChat}
+            disabled={!connectedWallet || isLoading}
+            className="flex w-full items-center justify-between border border-border-strong bg-black px-4 py-3 text-left text-[11px] font-mono uppercase tracking-widest text-text-primary transition-colors hover:border-accent-primary hover:text-accent-primary disabled:cursor-not-allowed disabled:opacity-50"
+            title="Start new chat"
+          >
+            <span className="flex items-center gap-3">
+              <Plus size={14} />
+              New chat
+            </span>
+            <span className="text-text-muted">+</span>
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
+          <div className="mb-3 px-2 text-[10px] uppercase tracking-widest text-text-muted font-mono">
+            Chats
+          </div>
+          {connectedWallet ? (
+            <div className="space-y-1">
+              {chats.map((chat) => (
+                <button
+                  key={chat.id}
+                  type="button"
+                  onClick={() => handleSelectChat(chat.id)}
+                  className={`group flex w-full items-center gap-3 border px-3 py-2.5 text-left transition-colors ${
+                    chat.id === currentChatId
+                      ? 'border-accent-primary/60 bg-accent-primary/10 text-text-primary'
+                      : 'border-transparent text-text-secondary hover:border-border-strong hover:bg-bg-base hover:text-text-primary'
+                  }`}
+                  title={chat.title}
+                >
+                  <MessageSquare size={14} className="shrink-0 text-text-muted group-hover:text-accent-primary" />
+                  <span className="min-w-0 flex-1 truncate text-[12px] font-mono">
+                    {chat.title}
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="px-2 py-4 text-[11px] leading-relaxed text-text-muted">
+              Connect a wallet to load its chat history.
+            </div>
+          )}
+        </div>
+
+        <div className="border-t border-border-strong p-4">
+          <div className="truncate text-[10px] uppercase tracking-widest text-text-muted font-mono">
+            {connectedWallet ? `${connectedWallet.slice(0, 8)}...${connectedWallet.slice(-6)}` : 'No wallet connected'}
+          </div>
+        </div>
+      </aside>
+
+      <div className="flex min-w-0 flex-1 flex-col">
       {/* Header */}
       <div className="h-14 border-b border-border-strong bg-bg-elevated flex items-center justify-between px-6 shrink-0 z-10">
         <div className="flex items-center gap-3">
@@ -565,7 +618,7 @@ export default function ChatInterface() {
             <h1 className="font-display text-[15px] font-semibold text-text-primary tracking-tight">AI Agent</h1>
             {connectedWallet && (
               <p className="text-[10px] text-text-muted font-mono mt-0.5">
-                {currentChat?.title || 'New chat'} • {connectedWallet.slice(0, 10)}...{connectedWallet.slice(-8)}
+                {currentChat?.title || 'New chat'} - {connectedWallet.slice(0, 10)}...{connectedWallet.slice(-8)}
               </p>
             )}
           </div>
@@ -574,18 +627,9 @@ export default function ChatInterface() {
          <div className="flex items-center gap-2">
            <button
              type="button"
-             onClick={() => setHistoryOpen((open) => !open)}
-             disabled={!connectedWallet}
-             className="flex items-center justify-center p-2 border border-border-strong hover:border-accent-primary text-text-secondary hover:text-accent-primary disabled:opacity-50 disabled:cursor-not-allowed transition-colors rounded-none"
-             title="View chat history"
-           >
-             <History size={14} />
-           </button>
-           <button
-             type="button"
              onClick={handleCreateNewChat}
              disabled={!connectedWallet || isLoading}
-             className="flex items-center justify-center p-2 border border-border-strong hover:border-accent-primary text-text-secondary hover:text-accent-primary disabled:opacity-50 disabled:cursor-not-allowed transition-colors rounded-none"
+             className="flex lg:hidden items-center justify-center p-2 border border-border-strong hover:border-accent-primary text-text-secondary hover:text-accent-primary disabled:opacity-50 disabled:cursor-not-allowed transition-colors rounded-none"
              title="Start new chat"
            >
              <Plus size={14} />
@@ -610,56 +654,6 @@ export default function ChatInterface() {
            <ConnectWalletButton network={selectedNetwork} />
          </div>
       </div>
-
-      {historyOpen && connectedWallet && (
-        <div className="border-b border-border-strong bg-bg-surface px-4 py-4 md:px-6">
-          <div className="mb-3 flex items-center justify-between">
-            <div className="text-[10px] uppercase tracking-widest text-text-muted font-mono">
-              Wallet-scoped chat history
-            </div>
-            <button
-              type="button"
-              onClick={handleCreateNewChat}
-              className="flex items-center gap-2 border border-border-strong px-3 py-2 text-[10px] font-mono uppercase tracking-widest text-text-secondary hover:border-accent-primary hover:text-accent-primary transition-colors"
-            >
-              <Plus size={12} />
-              New chat
-            </button>
-          </div>
-          <div className="max-h-52 space-y-2 overflow-y-auto">
-            {chats.map((chat) => (
-              <button
-                key={chat.id}
-                type="button"
-                onClick={() => handleSelectChat(chat.id)}
-                className={`w-full border px-3 py-3 text-left transition-colors ${
-                  chat.id === currentChatId
-                    ? 'border-accent-primary bg-accent-primary/10'
-                    : 'border-border-strong bg-bg-base hover:border-accent-primary'
-                }`}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 text-[11px] font-mono uppercase tracking-widest text-text-primary">
-                      <MessageSquare size={12} />
-                      <span className="truncate">{chat.title}</span>
-                    </div>
-                    <div className="mt-1 truncate text-[11px] text-text-muted">
-                      {chat.messages[chat.messages.length - 1]?.content || WELCOME_MESSAGE}
-                    </div>
-                  </div>
-                  <div className="shrink-0 text-[10px] font-mono text-text-muted">
-                    {new Date(chat.updatedAt).toLocaleDateString('en-US', {
-                      month: 'short',
-                      day: 'numeric',
-                    })}
-                  </div>
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Chat Area */}
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-6 md:px-12 md:py-10 space-y-8 md:space-y-10 scroll-smooth">
@@ -811,6 +805,7 @@ export default function ChatInterface() {
         }}
         recentCommands={recentCommands}
       />
+      </div>
     </div>
   );
 }
