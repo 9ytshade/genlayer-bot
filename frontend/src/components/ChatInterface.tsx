@@ -1,18 +1,77 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import MessageComponent from './Message';
 import QuickActions from './QuickActions';
 import CommandPalette from './CommandPalette';
 import ConnectWalletButton from './ConnectWalletButton';
 import type { Intent } from '../lib/api';
 import { MessageData, sendMessage, confirmAction, buildTransferTx, buildDeployTx, validateContractFile } from '../lib/api';
-import { Send, Bot, Loader2, Command, FileText } from 'lucide-react';
+import { Send, Bot, Loader2, Command, FileText, History, Plus, MessageSquare } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useWallet } from '@/context/WalletContext';
 import { useChainId } from 'wagmi';
 import { DEFAULT_NETWORK, NETWORK_CONFIG, type NetworkKey } from '@/config';
 import { parseEther } from 'viem';
+
+interface ChatSession {
+  id: string;
+  title: string;
+  updatedAt: number;
+  messages: MessageData[];
+}
+
+const STORAGE_KEY_PREFIX = 'genlayer-chat-history';
+const WELCOME_MESSAGE = "Hi! I'm your GenLayer AI assistant. You can ask me to check your balance, send tokens, or deploy intelligent contracts. What would you like to do?";
+
+function createWelcomeMessage(seed: number = Date.now()): MessageData {
+  return {
+    id: seed.toString(),
+    role: 'bot',
+    content: WELCOME_MESSAGE,
+  };
+}
+
+function createChatSession(seed: number = Date.now()): ChatSession {
+  return {
+    id: `chat-${seed}`,
+    title: 'New chat',
+    updatedAt: seed,
+    messages: [createWelcomeMessage(seed)],
+  };
+}
+
+function getWalletStorageKey(walletAddress: string) {
+  return `${STORAGE_KEY_PREFIX}:${walletAddress.toLowerCase()}`;
+}
+
+function deriveChatTitle(content: string) {
+  const normalized = content.replace(/\s+/g, ' ').trim();
+  if (!normalized) {
+    return 'New chat';
+  }
+  return normalized.length > 40 ? `${normalized.slice(0, 40)}...` : normalized;
+}
+
+function sanitizeMessages(messages: MessageData[]): MessageData[] {
+  return messages.map((message) => {
+    if (message.status === 'executing') {
+      return {
+        ...message,
+        status: 'error',
+        content: 'This action was interrupted. Please retry if you still want to execute it.',
+      };
+    }
+    return message;
+  });
+}
+
+function sanitizeChatSession(chat: ChatSession): ChatSession {
+  return {
+    ...chat,
+    messages: sanitizeMessages(chat.messages),
+  };
+}
 
 function normalizeDeployIntentForUi(intent: Intent, fileName?: string): Intent {
   const contractName = intent.contract_name || fileName?.replace(/\.py$/i, '') || 'IntelligentContract';
@@ -69,28 +128,91 @@ function parseDeployIntent(intent: Intent) {
 }
 
 export default function ChatInterface() {
-  const [messages, setMessages] = useState<MessageData[]>([{
-    id: 'msg-0',
-    role: 'bot',
-    content: "Hi! I'm your GenLayer AI assistant. You can ask me to check your balance, send tokens, or deploy intelligent contracts. What would you like to do?"
-  }]);
-  
+  const [chats, setChats] = useState<ChatSession[]>(() => [createChatSession()]);
+  const [currentChatId, setCurrentChatId] = useState<string>('');
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
   const { account: connectedWallet, sendTransaction, switchNetwork, refreshBalance } = useWallet();
   const [selectedNetwork, setSelectedNetwork] = useState<NetworkKey>(DEFAULT_NETWORK);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [recentCommands, setRecentCommands] = useState<string[]>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chainId = useChainId();
 
+  const currentChat = useMemo(
+    () => chats.find((chat) => chat.id === currentChatId) ?? chats[0],
+    [chats, currentChatId]
+  );
+  const messages = useMemo(() => currentChat?.messages ?? [], [currentChat]);
+
   useEffect(() => {
     const timer = window.setTimeout(() => setIsMounted(true), 0);
     return () => window.clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    if (!isMounted) {
+      return;
+    }
+
+    const syncWalletChats = () => {
+      if (!connectedWallet) {
+        const fallbackChat = createChatSession();
+        setChats([fallbackChat]);
+        setCurrentChatId(fallbackChat.id);
+        return;
+      }
+
+      const stored = window.localStorage.getItem(getWalletStorageKey(connectedWallet));
+      if (!stored) {
+        const nextChat = createChatSession();
+        setChats([nextChat]);
+        setCurrentChatId(nextChat.id);
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(stored) as { chats?: ChatSession[]; currentChatId?: string };
+        const storedChats = Array.isArray(parsed.chats)
+          ? parsed.chats.map(sanitizeChatSession).filter((chat) => Array.isArray(chat.messages) && chat.messages.length > 0)
+          : [];
+        if (storedChats.length === 0) {
+          const nextChat = createChatSession();
+          setChats([nextChat]);
+          setCurrentChatId(nextChat.id);
+          return;
+        }
+
+        const nextCurrentChatId = storedChats.some((chat) => chat.id === parsed.currentChatId)
+          ? parsed.currentChatId!
+          : storedChats[0].id;
+        setChats(storedChats);
+        setCurrentChatId(nextCurrentChatId);
+      } catch {
+        const nextChat = createChatSession();
+        setChats([nextChat]);
+        setCurrentChatId(nextChat.id);
+      }
+    };
+
+    const syncId = window.setTimeout(syncWalletChats, 0);
+    return () => window.clearTimeout(syncId);
+  }, [connectedWallet, isMounted]);
+
+  useEffect(() => {
+    if (!isMounted || !connectedWallet) {
+      return;
+    }
+
+    window.localStorage.setItem(
+      getWalletStorageKey(connectedWallet),
+      JSON.stringify({ chats, currentChatId })
+    );
+  }, [chats, currentChatId, connectedWallet, isMounted]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -104,6 +226,58 @@ export default function ChatInterface() {
     connectedWallet && chainId && chainId !== NETWORK_CONFIG[selectedNetwork].chainId
   );
 
+  const updateCurrentChatMessages = (updater: (messages: MessageData[]) => MessageData[]) => {
+    setChats((prevChats) => {
+      const activeChatId = currentChatId || prevChats[0]?.id;
+      if (!activeChatId) {
+        return prevChats;
+      }
+
+      const nextChats = prevChats.map((chat) => {
+        if (chat.id !== activeChatId) {
+          return chat;
+        }
+
+        const nextMessages = updater(chat.messages);
+        const firstUserMessage = nextMessages.find((message) => message.role === 'user');
+        return {
+          ...chat,
+          messages: nextMessages,
+          title: firstUserMessage ? deriveChatTitle(firstUserMessage.content) : chat.title,
+          updatedAt: Date.now(),
+        };
+      });
+
+      nextChats.sort((a, b) => b.updatedAt - a.updatedAt);
+      return nextChats;
+    });
+  };
+
+  const appendMessagesToCurrentChat = (...newMessages: MessageData[]) => {
+    updateCurrentChatMessages((prevMessages) => [...prevMessages, ...newMessages]);
+  };
+
+  const replaceMessageInCurrentChat = (messageId: string, updater: (message: MessageData) => MessageData) => {
+    updateCurrentChatMessages((prevMessages) =>
+      prevMessages.map((message) => (message.id === messageId ? updater(message) : message))
+    );
+  };
+
+  const handleCreateNewChat = () => {
+    const nextChat = createChatSession();
+    setChats((prevChats) => [nextChat, ...prevChats]);
+    setCurrentChatId(nextChat.id);
+    setInput('');
+    setUploadError(null);
+    setHistoryOpen(false);
+  };
+
+  const handleSelectChat = (chatId: string) => {
+    setCurrentChatId(chatId);
+    setHistoryOpen(false);
+    setUploadError(null);
+  };
+
   const handleNetworkChange = async (nextNetwork: NetworkKey) => {
     setSelectedNetwork(nextNetwork);
     if (!connectedWallet) {
@@ -114,15 +288,12 @@ export default function ChatInterface() {
       await switchNetwork(NETWORK_CONFIG[nextNetwork].chainId);
     } catch (error) {
       const message = error instanceof Error ? error.message : `Failed to switch wallet to ${NETWORK_CONFIG[nextNetwork].label}.`;
-      setMessages(prev => [
-        ...prev,
-        {
-          id: (Date.now() + 1).toString(),
-          role: 'bot',
-          content: message,
-          status: 'error',
-        },
-      ]);
+      appendMessagesToCurrentChat({
+        id: (Date.now() + 1).toString(),
+        role: 'bot',
+        content: message,
+        status: 'error',
+      });
     }
   };
 
@@ -136,12 +307,12 @@ export default function ChatInterface() {
     if (!file.name.endsWith('.py')) {
       const errorMessage = `Only Python contract files are supported. '${file.name}' is not a .py file.`;
       setUploadError(errorMessage);
-      setMessages(prev => [...prev, {
+      appendMessagesToCurrentChat({
         id: Date.now().toString(),
         role: 'bot',
         content: errorMessage,
         status: 'error',
-      }]);
+      });
       if (fileInputRef.current) fileInputRef.current.value = '';
       return;
     }
@@ -153,14 +324,14 @@ export default function ChatInterface() {
 
       // Automatically send the deployment command with the code
       const deployCmd = `Deploy this contract:\n\n${content}`;
-      
+
       const userMsg: MessageData = {
         id: Date.now().toString(),
         role: 'user',
         content: `Uploaded file: ${file.name}`
       };
 
-      setMessages(prev => [...prev, userMsg]);
+      appendMessagesToCurrentChat(userMsg);
       setIsLoading(true);
 
       try {
@@ -174,7 +345,7 @@ export default function ChatInterface() {
             status: 'error',
           };
           setUploadError(validation.message);
-          setMessages(prev => [...prev, botMsg]);
+          appendMessagesToCurrentChat(botMsg);
           return;
         }
 
@@ -204,17 +375,17 @@ export default function ChatInterface() {
           simulation: response.simulation,
           status: response.status === 'error' ? 'error' : 'awaiting_confirmation'
         };
-        setMessages(prev => [...prev, botMsg]);
+        appendMessagesToCurrentChat(botMsg);
       } catch (error) {
         console.error(error);
         const message = error instanceof Error ? error.message : 'Unable to validate the uploaded contract.';
         setUploadError(message);
-        setMessages(prev => [...prev, {
+        appendMessagesToCurrentChat({
           id: (Date.now() + 1).toString(),
           role: 'bot',
           content: message,
           status: 'error',
-        }]);
+        });
       } finally {
         setIsLoading(false);
         if (fileInputRef.current) fileInputRef.current.value = '';
@@ -236,7 +407,7 @@ export default function ChatInterface() {
     // Add to recent commands
     setRecentCommands(prev => [input.trim(), ...prev].slice(0, 5));
 
-    setMessages(prev => [...prev, userMsg]);
+    appendMessagesToCurrentChat(userMsg);
     setInput('');
     setIsLoading(true);
 
@@ -250,21 +421,18 @@ export default function ChatInterface() {
         simulation: response.simulation,
         status: response.status
       };
-      setMessages(prev => [...prev, botMsg]);
+      appendMessagesToCurrentChat(botMsg);
     } catch (error) {
       const message =
         error instanceof Error
           ? error.message
           : 'Failed to reach the server. Please try again.';
-      setMessages(prev => [
-        ...prev,
-        {
-          id: (Date.now() + 1).toString(),
-          role: 'bot',
-          content: message,
-          status: 'error',
-        },
-      ]);
+      appendMessagesToCurrentChat({
+        id: (Date.now() + 1).toString(),
+        role: 'bot',
+        content: message,
+        status: 'error',
+      });
     } finally {
       setIsLoading(false);
     }
@@ -275,16 +443,12 @@ export default function ChatInterface() {
     if (!msg || !msg.intent) return;
 
     if (!connectedWallet) {
-      setMessages(prev => prev.map(m => 
-        m.id === msgId ? { ...m, status: 'error', content: 'Wallet not connected' } : m
-      ));
+      replaceMessageInCurrentChat(msgId, (message) => ({ ...message, status: 'error', content: 'Wallet not connected' }));
       return;
     }
 
     // Update status to executing
-    setMessages(prev => prev.map(m => 
-      m.id === msgId ? { ...m, status: 'executing' } : m
-    ));
+    replaceMessageInCurrentChat(msgId, (message) => ({ ...message, status: 'executing' }));
 
     try {
       const intent = msg.intent;
@@ -342,9 +506,8 @@ export default function ChatInterface() {
       if (!result.error) {
         refreshBalance();
       }
-      setMessages(prev => prev.map(m => 
-        m.id === msgId ? { 
-          ...m, 
+      replaceMessageInCurrentChat(msgId, (message) => ({
+          ...message,
           status: result.error ? 'error' : 'success',
           intent: intentForConfirmation,
           txHash: result.txHash,
@@ -356,20 +519,15 @@ export default function ChatInterface() {
             : result.balance !== undefined
               ? `Your wallet balance is ${result.balance} GEN.`
               : result.content || 'Transaction successfully executed on GenLayer.'
-        } : m
-      ));
+      }));
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Network error during execution.';
-      setMessages(prev => prev.map(m => 
-        m.id === msgId ? { ...m, status: 'error', content: errorMessage } : m
-      ));
+      replaceMessageInCurrentChat(msgId, (message) => ({ ...message, status: 'error', content: errorMessage }));
     }
   };
 
   const handleCancel = (msgId: string) => {
-    setMessages(prev => prev.map(m => 
-      m.id === msgId ? { ...m, status: undefined, content: 'Transaction cancelled by user.' } : m
-    ));
+    replaceMessageInCurrentChat(msgId, (message) => ({ ...message, status: undefined, content: 'Transaction cancelled by user.' }));
   };
 
   const handleQuickAction = (command: string) => {
@@ -378,8 +536,8 @@ export default function ChatInterface() {
   };
 
   const handleIntentUpdate = (msgId: string, patch: Partial<Intent>) => {
-    setMessages(prev => prev.map(message => {
-      if (message.id !== msgId || !message.intent) {
+    replaceMessageInCurrentChat(msgId, (message) => {
+      if (!message.intent) {
         return message;
       }
       return {
@@ -389,7 +547,7 @@ export default function ChatInterface() {
           ...patch,
         },
       };
-    }));
+    });
   };
 
   if (!isMounted) return null;
@@ -406,12 +564,32 @@ export default function ChatInterface() {
           <div>
             <h1 className="font-display text-[15px] font-semibold text-text-primary tracking-tight">AI Agent</h1>
             {connectedWallet && (
-              <p className="text-[10px] text-text-muted font-mono mt-0.5">{connectedWallet.slice(0, 10)}...{connectedWallet.slice(-8)}</p>
+              <p className="text-[10px] text-text-muted font-mono mt-0.5">
+                {currentChat?.title || 'New chat'} • {connectedWallet.slice(0, 10)}...{connectedWallet.slice(-8)}
+              </p>
             )}
           </div>
         </div>
         
          <div className="flex items-center gap-2">
+           <button
+             type="button"
+             onClick={() => setHistoryOpen((open) => !open)}
+             disabled={!connectedWallet}
+             className="flex items-center justify-center p-2 border border-border-strong hover:border-accent-primary text-text-secondary hover:text-accent-primary disabled:opacity-50 disabled:cursor-not-allowed transition-colors rounded-none"
+             title="View chat history"
+           >
+             <History size={14} />
+           </button>
+           <button
+             type="button"
+             onClick={handleCreateNewChat}
+             disabled={!connectedWallet || isLoading}
+             className="flex items-center justify-center p-2 border border-border-strong hover:border-accent-primary text-text-secondary hover:text-accent-primary disabled:opacity-50 disabled:cursor-not-allowed transition-colors rounded-none"
+             title="Start new chat"
+           >
+             <Plus size={14} />
+           </button>
            <label htmlFor="network-select" className="text-[10px] uppercase tracking-widest text-text-muted font-mono">
              Network
            </label>
@@ -432,6 +610,56 @@ export default function ChatInterface() {
            <ConnectWalletButton network={selectedNetwork} />
          </div>
       </div>
+
+      {historyOpen && connectedWallet && (
+        <div className="border-b border-border-strong bg-bg-surface px-4 py-4 md:px-6">
+          <div className="mb-3 flex items-center justify-between">
+            <div className="text-[10px] uppercase tracking-widest text-text-muted font-mono">
+              Wallet-scoped chat history
+            </div>
+            <button
+              type="button"
+              onClick={handleCreateNewChat}
+              className="flex items-center gap-2 border border-border-strong px-3 py-2 text-[10px] font-mono uppercase tracking-widest text-text-secondary hover:border-accent-primary hover:text-accent-primary transition-colors"
+            >
+              <Plus size={12} />
+              New chat
+            </button>
+          </div>
+          <div className="max-h-52 space-y-2 overflow-y-auto">
+            {chats.map((chat) => (
+              <button
+                key={chat.id}
+                type="button"
+                onClick={() => handleSelectChat(chat.id)}
+                className={`w-full border px-3 py-3 text-left transition-colors ${
+                  chat.id === currentChatId
+                    ? 'border-accent-primary bg-accent-primary/10'
+                    : 'border-border-strong bg-bg-base hover:border-accent-primary'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 text-[11px] font-mono uppercase tracking-widest text-text-primary">
+                      <MessageSquare size={12} />
+                      <span className="truncate">{chat.title}</span>
+                    </div>
+                    <div className="mt-1 truncate text-[11px] text-text-muted">
+                      {chat.messages[chat.messages.length - 1]?.content || WELCOME_MESSAGE}
+                    </div>
+                  </div>
+                  <div className="shrink-0 text-[10px] font-mono text-text-muted">
+                    {new Date(chat.updatedAt).toLocaleDateString('en-US', {
+                      month: 'short',
+                      day: 'numeric',
+                    })}
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Chat Area */}
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-6 md:px-12 md:py-10 space-y-8 md:space-y-10 scroll-smooth">
