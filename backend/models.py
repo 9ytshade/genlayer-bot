@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, ForeignKey, Float, Integer
+from sqlalchemy import Column, String, DateTime, ForeignKey, Float, Integer, Text
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from .database import Base
@@ -31,6 +31,7 @@ class User(Base):
 
     # Relationship to platform wallets
     platform_wallets = relationship("PlatformWallet", back_populates="user", cascade="all, delete-orphan")
+    chat_history = relationship("ChatHistory", back_populates="user", cascade="all, delete-orphan", uselist=False)
 
     def to_dict(self):
         return {
@@ -78,3 +79,16 @@ class PlatformWallet(Base):
         if include_private_key:
             data["private_key"] = self.get_private_key()
         return data
+
+
+class ChatHistory(Base):
+    """Wallet-scoped persisted chat history."""
+    __tablename__ = "chat_histories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False, index=True)
+    payload = Column(Text, nullable=False, default="{}")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User", back_populates="chat_history")

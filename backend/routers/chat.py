@@ -1,20 +1,33 @@
-from fastapi import APIRouter, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 from web3 import Web3
+import json
 import os
 from typing import Any
 
-from ..auth import get_wallet_address_from_authorization
+from ..auth import get_current_user, get_wallet_address_from_authorization
 from ..contract_validation import validate_python_contract
+from ..database import get_db
 from ..genlayer_client import get_balance, get_client
 from ..intent_parser import parse_intent
 from ..logs_store import logs_store
+from ..models import ChatHistory, User
 from ..network_config import normalize_network
 from ..rate_limit import limiter
 from ..safety import normalize_intent, validate_intent
 from ..simulator import simulate_intent
 
 router = APIRouter(prefix="/chat", tags=["chat"])
+
+HELP_MESSAGE = """Available commands:
+
+help - Show this command list.
+check balance - Check the connected wallet balance on the selected GenLayer network.
+send tokens - Prepare a wallet-side GEN transfer. Example: Send 10 GEN to 0x...
+deploy contract - Start contract deployment. Upload a .py GenLayer Intelligent Contract file when prompted.
+new chat - Start a clean chat session from the left sidebar.
+switch network - Use the network selector to switch between Studionet and Bradbury."""
 
 class ChatRequest(BaseModel):
     message: str
@@ -75,6 +88,11 @@ class ContractValidationResponse(BaseModel):
     contract_names: list[str] = Field(default_factory=list)
 
 
+class ChatHistoryPayload(BaseModel):
+    chats: list[dict[str, Any]] = Field(default_factory=list)
+    currentChatId: str | None = None
+
+
 def get_wallet_address(authorization: str | None = Header(None)) -> str | None:
     return get_wallet_address_from_authorization(authorization)
 
@@ -96,6 +114,56 @@ def resolve_network_or_400(network: str | None) -> str:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
+
+def is_deploy_contract_request(message: str) -> bool:
+    normalized = " ".join(message.lower().strip().split())
+    return normalized.startswith(("deploy contract", "deploy a contract", "deploy an intelligent contract", "create contract", "create a contract"))
+
+
+def is_help_request(message: str) -> bool:
+    normalized = " ".join(message.lower().strip().split())
+    return normalized in {"help", "/help", "?", "commands", "show commands", "what can you do"}
+
+
+@router.get("/history", response_model=ChatHistoryPayload)
+def get_chat_history(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ChatHistoryPayload:
+    history = db.query(ChatHistory).filter(ChatHistory.user_id == current_user.id).first()
+    if not history:
+        return ChatHistoryPayload()
+
+    try:
+        payload = json.loads(history.payload)
+    except json.JSONDecodeError:
+        return ChatHistoryPayload()
+
+    return ChatHistoryPayload(
+        chats=payload.get("chats") if isinstance(payload.get("chats"), list) else [],
+        currentChatId=payload.get("currentChatId") if isinstance(payload.get("currentChatId"), str) else None,
+    )
+
+
+@router.put("/history", response_model=ChatHistoryPayload)
+def save_chat_history(
+    payload: ChatHistoryPayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ChatHistoryPayload:
+    history = db.query(ChatHistory).filter(ChatHistory.user_id == current_user.id).first()
+    serialized_payload = json.dumps(payload.model_dump(), separators=(",", ":"))
+
+    if history:
+        history.payload = serialized_payload
+    else:
+        history = ChatHistory(user_id=current_user.id, payload=serialized_payload)
+        db.add(history)
+
+    db.commit()
+    return payload
+
+
 @router.post("")
 @limiter.limit("10/minute")
 async def handle_chat(request: Request, chat_request: ChatRequest):
@@ -107,7 +175,17 @@ async def handle_chat(request: Request, chat_request: ChatRequest):
         {"message": chat_request.message, "wallet_address": chat_request.wallet_address, "network": network},
     )
 
+    if is_help_request(chat_request.message):
+        await logs_store.append("INFO", "HELP_REQUESTED", "Help command shown.")
+        return {
+            "content": HELP_MESSAGE,
+            "intent": {"action": "help"},
+            "status": "success",
+        }
+
     intent = normalize_intent(parse_intent(chat_request.message))
+    if intent.get("action") == "unknown" and is_deploy_contract_request(chat_request.message):
+        intent = {"action": "deploy_contract"}
 
     if intent.get("action") == "deploy_contract" and intent.get("code"):
         validation = validate_python_contract(str(intent["code"]))
@@ -158,7 +236,7 @@ async def handle_chat(request: Request, chat_request: ChatRequest):
     if intent["action"] == "deploy_contract":
         if not intent.get("code"):
             return {
-                "content": "Please provide the Python code for your GenLayer Intelligent Contract.",
+                "content": "Please upload a .py GenLayer Intelligent Contract file for deployment. I will validate it, collect any constructor parameters, and prepare the Studionet deployment transaction for your wallet.",
                 "intent": intent,
                 "status": "awaiting_input",
             }

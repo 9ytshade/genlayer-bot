@@ -43,6 +43,21 @@ export interface MessageData {
   consensusTxId?: string;
   contractAddress?: string;
   derivedAddresses?: string[];
+  helpCommands?: Array<{
+    label: string;
+    command: string;
+    description: string;
+  }>;
+}
+
+export interface ChatHistoryPayload {
+  chats: Array<{
+    id: string;
+    title: string;
+    updatedAt: number;
+    messages: MessageData[];
+  }>;
+  currentChatId?: string | null;
 }
 
 import { API_BASE_URL as API_URL } from '@/config';
@@ -141,6 +156,39 @@ export async function getPlatformWallet(walletAddress: string): Promise<Platform
     throw new Error(errorData.detail || `Failed to fetch platform wallet: ${response.status}`);
   }
   return response.json();
+}
+
+export async function getChatHistory(walletAddress: string): Promise<ChatHistoryPayload | null> {
+  const response = await fetch(`${API_URL}/chat/history`, {
+    headers: authHeaders(walletAddress),
+  });
+
+  if (response.status === 401 || response.status === 404) {
+    return null;
+  }
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Failed to fetch chat history: ${response.status}`);
+  }
+
+  return response.json();
+}
+
+export async function saveChatHistory(walletAddress: string, payload: ChatHistoryPayload): Promise<void> {
+  const response = await fetch(`${API_URL}/chat/history`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders(walletAddress),
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Failed to save chat history: ${response.status}`);
+  }
 }
 
 export async function validateContractFile(code: string, fileName: string, walletAddress?: string): Promise<ContractValidationResult> {

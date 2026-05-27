@@ -12,9 +12,10 @@ interface MessageProps {
   onConfirm: (id: string) => void;
   onCancel: (id: string) => void;
   onUpdateIntent: (id: string, patch: Partial<NonNullable<MessageData['intent']>>) => void;
+  onRunCommand?: (command: string) => void;
 }
 
-export default function Message({ msg, onConfirm, onCancel, onUpdateIntent }: MessageProps) {
+export default function Message({ msg, onConfirm, onCancel, onUpdateIntent, onRunCommand }: MessageProps) {
   const isUser = msg.role === 'user';
   const [copied, setCopied] = useState(false);
   const [copiedAddress, setCopiedAddress] = useState<string | null>(null);
@@ -61,6 +62,26 @@ export default function Message({ msg, onConfirm, onCancel, onUpdateIntent }: Me
         <div className={`px-6 py-4 border ${isUser ? 'bg-accent-primary text-black border-accent-primary rounded-none shadow-[0_0_15px_rgba(255,176,0,0.15)]' : 'bg-bg-elevated border-border-strong text-text-primary rounded-none'}`}>
           <p className="text-[14px] leading-relaxed whitespace-pre-wrap font-sans">{msg.content}</p>
         </div>
+
+        {!isUser && msg.helpCommands && msg.helpCommands.length > 0 && (
+          <div className="grid w-full gap-2 mt-2 sm:grid-cols-2">
+            {msg.helpCommands.map((command) => (
+              <button
+                key={command.label}
+                type="button"
+                onClick={() => onRunCommand?.(command.command)}
+                className="border border-border-strong bg-black px-3 py-3 text-left transition-colors hover:border-accent-primary hover:bg-accent-primary/10 group"
+              >
+                <div className="text-[11px] font-mono font-bold uppercase tracking-widest text-accent-primary group-hover:text-white">
+                  {command.label}
+                </div>
+                <div className="mt-1 text-[10px] leading-relaxed text-text-muted">
+                  {command.description}
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
 
         {!isUser && msg.intent && (
           <div className="w-full mt-2">

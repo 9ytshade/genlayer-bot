@@ -6,7 +6,7 @@ import QuickActions from './QuickActions';
 import CommandPalette from './CommandPalette';
 import ConnectWalletButton from './ConnectWalletButton';
 import type { Intent } from '../lib/api';
-import { MessageData, sendMessage, confirmAction, buildTransferTx, buildDeployTx, validateContractFile } from '../lib/api';
+import { MessageData, sendMessage, confirmAction, buildTransferTx, buildDeployTx, validateContractFile, getChatHistory, saveChatHistory, getStoredAuthToken } from '../lib/api';
 import { Send, Bot, Loader2, Command, FileText, Plus, MessageSquare } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useWallet } from '@/context/WalletContext';
@@ -23,6 +23,46 @@ interface ChatSession {
 
 const STORAGE_KEY_PREFIX = 'genlayer-chat-history';
 const WELCOME_MESSAGE = "Hi! I'm your GenLayer AI assistant. You can ask me to check your balance, send tokens, or deploy intelligent contracts. What would you like to do?";
+const HELP_MESSAGE = `Available commands:
+
+help - Show this command list.
+check balance - Check the connected wallet balance on the selected GenLayer network.
+send tokens - Prepare a wallet-side GEN transfer. Example: Send 10 GEN to 0x...
+deploy contract - Start contract deployment. I will ask you to upload a .py GenLayer Intelligent Contract file.
+new chat - Start a clean chat session from the left sidebar.
+switch network - Use the network selector to switch between Studionet and Bradbury.`;
+const HELP_COMMANDS: NonNullable<MessageData['helpCommands']> = [
+  {
+    label: 'Check Balance',
+    command: 'What is my balance?',
+    description: 'Check the connected wallet balance on the selected network.',
+  },
+  {
+    label: 'Send Tokens',
+    command: 'Send 10 GEN to ',
+    description: 'Start a GEN transfer. Add the recipient address before sending.',
+  },
+  {
+    label: 'Deploy Contract',
+    command: 'Deploy contract',
+    description: 'Upload a .py contract file and review deployment parameters.',
+  },
+  {
+    label: 'New Chat',
+    command: '__new_chat__',
+    description: 'Start a clean chat session for this wallet.',
+  },
+  {
+    label: 'Switch Network',
+    command: '__switch_network__',
+    description: 'Show where to switch between Studionet and Bradbury.',
+  },
+  {
+    label: 'Help',
+    command: 'help',
+    description: 'Show this command menu again.',
+  },
+];
 
 function createWelcomeMessage(seed: number = Date.now()): MessageData {
   return {
@@ -70,6 +110,29 @@ function sanitizeChatSession(chat: ChatSession): ChatSession {
   return {
     ...chat,
     messages: sanitizeMessages(chat.messages),
+  };
+}
+
+function normalizeChatHistoryPayload(payload?: { chats?: ChatSession[]; currentChatId?: string | null }) {
+  const storedChats = Array.isArray(payload?.chats)
+    ? payload.chats
+        .map(sanitizeChatSession)
+        .filter((chat) => Array.isArray(chat.messages) && chat.messages.length > 0)
+    : [];
+
+  if (storedChats.length === 0) {
+    const nextChat = createChatSession();
+    return {
+      chats: [nextChat],
+      currentChatId: nextChat.id,
+    };
+  }
+
+  return {
+    chats: storedChats,
+    currentChatId: storedChats.some((chat) => chat.id === payload?.currentChatId)
+      ? payload!.currentChatId!
+      : storedChats[0].id,
   };
 }
 
@@ -127,6 +190,35 @@ function parseDeployIntent(intent: Intent) {
   };
 }
 
+function isDeployContractCommand(content: string) {
+  const normalized = content.trim().toLowerCase();
+  return /^(deploy|upload|create)\s+(an?\s+)?(intelligent\s+)?contract\b/.test(normalized);
+}
+
+function isHelpCommand(content: string) {
+  const normalized = content.trim().toLowerCase();
+  return /^(help|\/help|\?|commands|show commands|what can you do)$/.test(normalized);
+}
+
+function createDeployUploadPrompt(): MessageData {
+  return {
+    id: (Date.now() + 1).toString(),
+    role: 'bot',
+    content: 'Please upload a .py GenLayer Intelligent Contract file for deployment. Use the file upload button beside the chat input, then I will validate it and ask for the deployment parameters.',
+    intent: { action: 'deploy_contract' },
+    status: 'awaiting_input',
+  };
+}
+
+function createHelpMessage(): MessageData {
+  return {
+    id: (Date.now() + 1).toString(),
+    role: 'bot',
+    content: HELP_MESSAGE,
+    helpCommands: HELP_COMMANDS,
+  };
+}
+
 export default function ChatInterface() {
   const [chats, setChats] = useState<ChatSession[]>(() => [createChatSession()]);
   const [currentChatId, setCurrentChatId] = useState<string>('');
@@ -140,6 +232,7 @@ export default function ChatInterface() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const isHydratingHistoryRef = useRef(false);
   const chainId = useChainId();
 
   const currentChat = useMemo(
@@ -158,48 +251,81 @@ export default function ChatInterface() {
       return;
     }
 
-    const syncWalletChats = () => {
+    let cancelled = false;
+
+    const applyHistory = (payload?: { chats?: ChatSession[]; currentChatId?: string | null }) => {
+      const normalized = normalizeChatHistoryPayload(payload);
+      if (cancelled) {
+        return normalized;
+      }
+      setChats(normalized.chats);
+      setCurrentChatId(normalized.currentChatId);
+      return normalized;
+    };
+
+    const waitForAuthToken = async () => {
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        if (!connectedWallet || getStoredAuthToken(connectedWallet)) {
+          return Boolean(connectedWallet && getStoredAuthToken(connectedWallet));
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 500));
+      }
+      return Boolean(connectedWallet && getStoredAuthToken(connectedWallet));
+    };
+
+    const syncWalletChats = async () => {
+      isHydratingHistoryRef.current = true;
       if (!connectedWallet) {
         const fallbackChat = createChatSession();
         setChats([fallbackChat]);
         setCurrentChatId(fallbackChat.id);
+        isHydratingHistoryRef.current = false;
         return;
       }
 
       const stored = window.localStorage.getItem(getWalletStorageKey(connectedWallet));
+      let localHistory: ReturnType<typeof normalizeChatHistoryPayload>;
       if (!stored) {
-        const nextChat = createChatSession();
-        setChats([nextChat]);
-        setCurrentChatId(nextChat.id);
-        return;
+        localHistory = applyHistory();
+      } else {
+        try {
+          const parsed = JSON.parse(stored) as { chats?: ChatSession[]; currentChatId?: string };
+          localHistory = applyHistory(parsed);
+        } catch {
+          localHistory = applyHistory();
+        }
       }
 
       try {
-        const parsed = JSON.parse(stored) as { chats?: ChatSession[]; currentChatId?: string };
-        const storedChats = Array.isArray(parsed.chats)
-          ? parsed.chats.map(sanitizeChatSession).filter((chat) => Array.isArray(chat.messages) && chat.messages.length > 0)
-          : [];
-        if (storedChats.length === 0) {
-          const nextChat = createChatSession();
-          setChats([nextChat]);
-          setCurrentChatId(nextChat.id);
+        const hasAuthToken = await waitForAuthToken();
+        if (!hasAuthToken || cancelled) {
           return;
         }
 
-        const nextCurrentChatId = storedChats.some((chat) => chat.id === parsed.currentChatId)
-          ? parsed.currentChatId!
-          : storedChats[0].id;
-        setChats(storedChats);
-        setCurrentChatId(nextCurrentChatId);
-      } catch {
-        const nextChat = createChatSession();
-        setChats([nextChat]);
-        setCurrentChatId(nextChat.id);
+        const remoteHistory = await getChatHistory(connectedWallet);
+        if (remoteHistory && remoteHistory.chats.length > 0) {
+          const normalized = applyHistory(remoteHistory);
+          window.localStorage.setItem(getWalletStorageKey(connectedWallet), JSON.stringify(normalized));
+        } else {
+          await saveChatHistory(connectedWallet, localHistory);
+        }
+      } catch (error) {
+        console.warn('Unable to load remote chat history:', error);
+      } finally {
+        if (!cancelled) {
+          isHydratingHistoryRef.current = false;
+        }
       }
     };
 
-    const syncId = window.setTimeout(syncWalletChats, 0);
-    return () => window.clearTimeout(syncId);
+    const syncId = window.setTimeout(() => {
+      void syncWalletChats();
+    }, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(syncId);
+      isHydratingHistoryRef.current = false;
+    };
   }, [connectedWallet, isMounted]);
 
   useEffect(() => {
@@ -211,6 +337,20 @@ export default function ChatInterface() {
       getWalletStorageKey(connectedWallet),
       JSON.stringify({ chats, currentChatId })
     );
+  }, [chats, currentChatId, connectedWallet, isMounted]);
+
+  useEffect(() => {
+    if (!isMounted || !connectedWallet || isHydratingHistoryRef.current || !getStoredAuthToken(connectedWallet)) {
+      return;
+    }
+
+    const saveId = window.setTimeout(() => {
+      saveChatHistory(connectedWallet, { chats, currentChatId }).catch((error) => {
+        console.warn('Unable to save remote chat history:', error);
+      });
+    }, 700);
+
+    return () => window.clearTimeout(saveId);
   }, [chats, currentChatId, connectedWallet, isMounted]);
 
   const scrollToBottom = () => {
@@ -393,19 +533,36 @@ export default function ChatInterface() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!connectedWallet || !input.trim() || isLoading || isNetworkMismatch) return;
+    await executeCommand(input);
+  };
 
+  const executeCommand = async (command: string) => {
+    if (!connectedWallet || !command.trim() || isLoading || isNetworkMismatch) return;
+
+    const trimmedInput = command.trim();
     const userMsg: MessageData = {
       id: Date.now().toString(),
       role: 'user',
-      content: input.trim()
+      content: trimmedInput
     };
 
     // Add to recent commands
-    setRecentCommands(prev => [input.trim(), ...prev].slice(0, 5));
+    setRecentCommands(prev => [trimmedInput, ...prev].slice(0, 5));
 
     appendMessagesToCurrentChat(userMsg);
     setInput('');
+
+    if (isHelpCommand(trimmedInput)) {
+      appendMessagesToCurrentChat(createHelpMessage());
+      return;
+    }
+
+    if (isDeployContractCommand(trimmedInput)) {
+      appendMessagesToCurrentChat(createDeployUploadPrompt());
+      setUploadError(null);
+      return;
+    }
+
     setIsLoading(true);
 
     try {
@@ -528,6 +685,52 @@ export default function ChatInterface() {
   };
 
   const handleQuickAction = (command: string) => {
+    if (command === '__new_chat__') {
+      handleCreateNewChat();
+      return;
+    }
+
+    if (command === '__switch_network__') {
+      appendMessagesToCurrentChat({
+        id: Date.now().toString(),
+        role: 'bot',
+        content: 'Use the Network selector in the top bar to switch between Studionet and Bradbury. If your wallet supports it, I will also ask the wallet to switch automatically.',
+      });
+      return;
+    }
+
+    if (isHelpCommand(command)) {
+      appendMessagesToCurrentChat(
+        {
+          id: Date.now().toString(),
+          role: 'user',
+          content: command,
+        },
+        createHelpMessage()
+      );
+      setRecentCommands(prev => [command, ...prev.filter((item) => item !== command)].slice(0, 5));
+      return;
+    }
+
+    if (command.trim().toLowerCase().startsWith('what is my balance')) {
+      void executeCommand(command);
+      return;
+    }
+
+    if (isDeployContractCommand(command)) {
+      appendMessagesToCurrentChat(
+        {
+          id: Date.now().toString(),
+          role: 'user',
+          content: command,
+        },
+        createDeployUploadPrompt()
+      );
+      setRecentCommands(prev => [command, ...prev.filter((item) => item !== command)].slice(0, 5));
+      setUploadError(null);
+      return;
+    }
+
     setInput(command);
     setRecentCommands(prev => [command, ...prev.filter((item) => item !== command)].slice(0, 5));
   };
@@ -697,6 +900,7 @@ export default function ChatInterface() {
               onConfirm={handleConfirm}
               onCancel={handleCancel}
               onUpdateIntent={handleIntentUpdate}
+              onRunCommand={handleQuickAction}
             />
           ))}
           {isLoading && (
@@ -800,7 +1004,7 @@ export default function ChatInterface() {
         isOpen={commandPaletteOpen}
         onClose={() => setCommandPaletteOpen(false)}
         onSelectCommand={(cmd) => {
-          setInput(cmd);
+          handleQuickAction(cmd);
           setCommandPaletteOpen(false);
         }}
         recentCommands={recentCommands}

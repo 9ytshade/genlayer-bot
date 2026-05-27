@@ -14,8 +14,8 @@ interface CommandPaletteProps {
 const commonCommands = [
   { label: 'Check Balance', command: 'What is my balance?' },
   { label: 'Send Tokens', command: 'Send 10 GEN to' },
-  { label: 'Deploy Contract', command: 'Create a contract for' },
-  { label: 'Get Help', command: 'Help' },
+  { label: 'Deploy Contract', command: 'Deploy contract' },
+  { label: 'Get Help', command: 'help' },
   { label: 'View History', command: 'Show my transaction history' },
 ];
 

@@ -39,7 +39,7 @@ def init_db():
     # Import models here to ensure their table definitions are registered
     # with Base.metadata before create_all is called, regardless of
     # import order in the application startup sequence.
-    from .models import PlatformWallet, User  # noqa: F401
+    from .models import ChatHistory, PlatformWallet, User  # noqa: F401
     Base.metadata.create_all(bind=engine)
 
 

@@ -11,7 +11,7 @@ export default function QuickActions({ onSelectAction }: QuickActionsProps) {
   const actions = [
     { label: 'Check Balance', command: 'What is my balance?', icon: Wallet },
     { label: 'Send Tokens', command: 'Send 10 GEN to', icon: Send },
-    { label: 'Deploy Contract', command: 'Create a contract for', icon: FileCode },
+    { label: 'Deploy Contract', command: 'Deploy contract', icon: FileCode },
   ];
 
   return (
