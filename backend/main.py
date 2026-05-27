@@ -3,26 +3,25 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 import os
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
-try:
-    from .routers import chat, wallet, logs
-    from .database import init_db
-except ImportError:
-    # Fallback when running from inside backend directory.
-    from routers import chat, wallet, logs
-    from database import init_db
+from . import auth
+from .database import run_migrations
+from .rate_limit import limiter, rate_limit_exceeded_handler
+from .routers import chat, logs, users, wallet
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup - initialize database
-    init_db()
+    run_migrations()
     yield
-    # Shutdown
-    pass
 
 app = FastAPI(title="GenLayer AI Chatbot API", lifespan=lifespan)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 ALLOWED_ORIGINS = [
     o.strip()
@@ -41,6 +40,8 @@ app.add_middleware(
 app.include_router(chat.router)
 app.include_router(wallet.router)
 app.include_router(logs.router)
+app.include_router(auth.router)
+app.include_router(users.router, prefix="/users", tags=["users"])
 
 @app.get("/health")
 def health_check():

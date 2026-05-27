@@ -10,10 +10,7 @@ from eth_abi import encode as abi_encode
 from genlayer_py.abi import calldata
 from genlayer_py.abi.transactions import serialize
 from web3.constants import ADDRESS_ZERO
-try:
-    from .network_config import get_network_config
-except ImportError:
-    from network_config import get_network_config
+from .network_config import get_network_config
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
 
@@ -34,7 +31,7 @@ def make_calldata_object(
 class GenLayerClientWrapper:
     def __init__(self, private_key: str = None, network: str | None = None):
         self.network, rpc_url, chain_id = get_network_config(network)
-        self.private_key = private_key or os.getenv("WALLET_PRIVATE_KEY")
+        self.private_key = private_key or os.getenv("ADMIN_PRIVATE_KEY")
 
         self.rpc_url = rpc_url
         self.chain_id = chain_id
@@ -81,6 +78,9 @@ class GenLayerClientWrapper:
         consensus_contract = chain.consensus_main_contract
         if not consensus_contract:
             raise RuntimeError(f"Consensus contract is not configured for {self.network}")
+        consensus_address = os.getenv("GENLAYER_CONSENSUS_CONTRACT_ADDRESS")
+        if not consensus_address:
+            raise RuntimeError("GENLAYER_CONSENSUS_CONTRACT_ADDRESS is not set")
 
         rotations = consensus_max_rotations or chain.default_consensus_max_rotations
         data = [
@@ -104,7 +104,7 @@ class GenLayerClientWrapper:
 
         params = abi_encode(contract_fn.argument_types, add_transaction_args)
         selector = eth_utils.keccak(text=contract_fn.signature)[:4].hex()
-        return "0x" + selector + params.hex(), Web3.to_checksum_address(consensus_contract["address"])
+        return "0x" + selector + params.hex(), Web3.to_checksum_address(consensus_address)
 
     async def build_deploy_transaction(
         self,

@@ -64,11 +64,91 @@ export interface ContractValidationResult {
   contract_names: string[];
 }
 
-export async function validateContractFile(code: string, fileName: string): Promise<ContractValidationResult> {
+const tokenKey = (address: string) => `genlayer-auth:${address.toLowerCase()}`;
+
+export function getStoredAuthToken(address?: string | null): string | null {
+  if (!address || typeof window === 'undefined') {
+    return null;
+  }
+  return window.localStorage.getItem(tokenKey(address));
+}
+
+export function setStoredAuthToken(address: string, token: string) {
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(tokenKey(address), token);
+  }
+}
+
+export function clearStoredAuthToken(address?: string | null) {
+  if (address && typeof window !== 'undefined') {
+    window.localStorage.removeItem(tokenKey(address));
+  }
+}
+
+function authHeaders(walletAddress?: string | null): HeadersInit {
+  const token = getStoredAuthToken(walletAddress);
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+export async function getNonce(address: string): Promise<string> {
+  const url = new URL(`${API_URL}/auth/nonce`);
+  url.searchParams.set('address', address);
+  const response = await fetch(url.toString(), { headers: authHeaders(address) });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Failed to get auth nonce: ${response.status}`);
+  }
+  const data = await response.json();
+  return data.nonce;
+}
+
+export async function verifySignature(address: string, message: string, signature: string): Promise<string> {
+  const response = await fetch(`${API_URL}/auth/verify`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ address, message, signature }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Failed to verify wallet signature: ${response.status}`);
+  }
+
+  const data = await response.json();
+  setStoredAuthToken(address, data.access_token);
+  return data.access_token;
+}
+
+export interface PlatformWalletResponse {
+  id: number;
+  user_id: number;
+  address: string;
+  balance: number;
+  created_at: string;
+}
+
+export async function getPlatformWallet(walletAddress: string): Promise<PlatformWalletResponse | null> {
+  const response = await fetch(`${API_URL}/users/me/wallet`, {
+    headers: authHeaders(walletAddress),
+  });
+  if (response.status === 404 || response.status === 401) {
+    return null;
+  }
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Failed to fetch platform wallet: ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function validateContractFile(code: string, fileName: string, walletAddress?: string): Promise<ContractValidationResult> {
   const response = await fetch(`${API_URL}/chat/validate-contract`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      ...authHeaders(walletAddress),
     },
     body: JSON.stringify({
       code,
@@ -91,6 +171,7 @@ export async function sendMessage(content: string, walletAddress?: string, netwo
   try {
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
+      ...authHeaders(walletAddress),
     };
 
     const body = walletAddress
@@ -137,6 +218,7 @@ export async function confirmAction(
   try {
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
+      ...authHeaders(walletAddress),
     };
 
     const body = {
@@ -193,7 +275,7 @@ export async function getWalletBalance(address?: string, network?: NetworkKey): 
   const timeout = setTimeout(() => controller.abort(), 20000);
 
   try {
-    const response = await fetch(url.toString(), { signal: controller.signal });
+    const response = await fetch(url.toString(), { signal: controller.signal, headers: authHeaders(address) });
     if (!response.ok) {
       throw new Error(`Failed to fetch wallet balance: ${response.status}`);
     }
@@ -223,7 +305,7 @@ export async function getTxParams(address: string, network: NetworkKey): Promise
   url.searchParams.set('network', network);
 
   try {
-    const response = await fetch(url.toString());
+    const response = await fetch(url.toString(), { headers: authHeaders(address) });
     if (!response.ok) {
       throw new Error(`Failed to fetch tx params: ${response.status}`);
     }
@@ -294,6 +376,7 @@ export async function buildDeployTx(
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      ...authHeaders(walletAddress),
     },
     body: JSON.stringify({
       address: walletAddress,

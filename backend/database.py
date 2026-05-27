@@ -1,5 +1,10 @@
 import os
+from pathlib import Path
+
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import create_engine
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker, declarative_base
 from dotenv import load_dotenv
 
@@ -34,8 +39,18 @@ def init_db():
     # Import models here to ensure their table definitions are registered
     # with Base.metadata before create_all is called, regardless of
     # import order in the application startup sequence.
-    try:
-        from .models import User, PlatformWallet  # noqa: F401
-    except ImportError:
-        from models import User, PlatformWallet  # noqa: F401
+    from .models import PlatformWallet, User  # noqa: F401
     Base.metadata.create_all(bind=engine)
+
+
+def run_migrations():
+    """Run Alembic migrations on application startup."""
+    backend_dir = Path(__file__).resolve().parent
+    config = Config(str(backend_dir / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_dir / "alembic"))
+    try:
+        command.upgrade(config, "head")
+    except OperationalError as exc:
+        if "already exists" not in str(exc):
+            raise
+        command.stamp(config, "head")

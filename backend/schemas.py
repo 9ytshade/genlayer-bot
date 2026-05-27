@@ -46,6 +46,7 @@ class PlatformWalletResponse(BaseModel):
 class PlatformWalletWithPrivateKey(PlatformWalletResponse):
     """Schema for platform wallet with private key (only for creation)"""
     private_key: str
+    custodial_warning: str
 
 
 # Fund Wallet Schemas

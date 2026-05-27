@@ -4,7 +4,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useWallet } from '../context/WalletContext';
 import { Wallet, LogOut, Copy, Check, AlertCircle, Loader2 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { getWalletBalance } from '../lib/api';
+import { getPlatformWallet, getWalletBalance } from '../lib/api';
 import type { NetworkKey } from '@/config';
 
 interface ConnectWalletButtonProps {
@@ -18,22 +18,20 @@ export default function ConnectWalletButton({ network }: ConnectWalletButtonProp
   const [balance, setBalance] = useState<number | null>(null);
   const [isBalanceLoading, setIsBalanceLoading] = useState(false);
   const [balanceError, setBalanceError] = useState<string | null>(null);
+  const [hasPlatformWallet, setHasPlatformWallet] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Close dropdown when clicking outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setIsOpen(false);
       }
     }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const formatAddress = (addr: string) => {
-    return `${addr.substring(0, 6)}...${addr.substring(addr.length - 4)}`;
-  };
+  const formatAddress = (addr: string) => `${addr.substring(0, 6)}...${addr.substring(addr.length - 4)}`;
 
   const handleCopy = () => {
     if (account) {
@@ -44,7 +42,7 @@ export default function ConnectWalletButton({ network }: ConnectWalletButtonProp
   };
 
   const walletLabel = account
-    ? `${formatAddress(account)}${balance !== null ? ` · ${balance.toFixed(4)} GEN` : isBalanceLoading ? ' · loading' : ' · --'}`
+    ? `${formatAddress(account)}${balance !== null ? ` - ${balance.toFixed(4)} GEN` : isBalanceLoading ? ' - loading' : ' - --'}`
     : 'Connect Wallet';
 
   useEffect(() => {
@@ -61,8 +59,7 @@ export default function ConnectWalletButton({ network }: ConnectWalletButtonProp
       try {
         const data = await getWalletBalance(account, network);
         setBalance(data.balance);
-      } catch (err) {
-        console.error(err);
+      } catch {
         setBalance(null);
         setBalanceError('Unable to load balance');
       } finally {
@@ -72,6 +69,24 @@ export default function ConnectWalletButton({ network }: ConnectWalletButtonProp
 
     fetchBalance();
   }, [account, isConnected, network, balanceRefreshNonce]);
+
+  useEffect(() => {
+    const fetchPlatformWallet = async () => {
+      if (!account || !isConnected) {
+        setHasPlatformWallet(false);
+        return;
+      }
+
+      try {
+        const platformWallet = await getPlatformWallet(account);
+        setHasPlatformWallet(Boolean(platformWallet));
+      } catch {
+        setHasPlatformWallet(false);
+      }
+    };
+
+    fetchPlatformWallet();
+  }, [account, isConnected]);
 
   if (isConnecting) {
     return (
@@ -90,7 +105,7 @@ export default function ConnectWalletButton({ network }: ConnectWalletButtonProp
             <AlertCircle size={10} /> {error}
           </span>
         )}
-        <button 
+        <button
           onClick={connect}
           className="flex items-center gap-2 px-3 py-1.5 bg-black border border-accent-primary text-accent-primary hover:bg-accent-primary hover:text-black text-[11px] font-mono font-bold uppercase tracking-widest transition-colors shadow-none"
         >
@@ -103,7 +118,7 @@ export default function ConnectWalletButton({ network }: ConnectWalletButtonProp
 
   return (
     <div className="relative" ref={dropdownRef}>
-      <button 
+      <button
         onClick={() => setIsOpen(!isOpen)}
         className={`flex items-center gap-2 px-3 py-1.5 bg-black border ${isOpen ? 'border-text-primary text-text-primary' : 'border-border-strong text-text-secondary'} hover:border-text-primary hover:text-text-primary text-[11px] font-mono uppercase transition-colors`}
       >
@@ -118,7 +133,7 @@ export default function ConnectWalletButton({ network }: ConnectWalletButtonProp
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -5 }}
             transition={{ duration: 0.15 }}
-            className="absolute right-0 top-full mt-1 w-48 bg-bg-elevated border border-border-strong shadow-2xl z-50 overflow-hidden"
+            className="absolute right-0 top-full mt-1 w-64 bg-bg-elevated border border-border-strong shadow-2xl z-50 overflow-hidden"
           >
             <div className="p-3 border-b border-border-subtle bg-bg-base">
               <span className="text-[10px] text-text-muted font-mono uppercase tracking-widest">Active Connection</span>
@@ -137,9 +152,15 @@ export default function ConnectWalletButton({ network }: ConnectWalletButtonProp
                 )}
               </div>
             </div>
-            
+
+            {hasPlatformWallet && (
+              <div className="px-3 py-2 border-b border-border-subtle text-[10px] font-mono leading-relaxed text-accent-warning bg-accent-warning/10">
+                This is a server-managed wallet. Do not deposit funds you cannot afford to lose. Private keys are stored encrypted on the server.
+              </div>
+            )}
+
             <div className="p-1 flex flex-col">
-              <button 
+              <button
                 onClick={handleCopy}
                 className="w-full text-left px-3 py-2 text-[11px] font-mono text-text-primary hover:bg-bg-surface hover:text-accent-primary transition-colors flex items-center justify-between group"
               >
@@ -148,8 +169,8 @@ export default function ConnectWalletButton({ network }: ConnectWalletButtonProp
                   {copied ? 'COPIED!' : 'Copy address'}
                 </span>
               </button>
-              
-              <button 
+
+              <button
                 onClick={() => {
                   disconnect();
                   setIsOpen(false);

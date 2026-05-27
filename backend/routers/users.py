@@ -1,31 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from database import get_db
-from models import User, PlatformWallet
-from schemas import UserCreate, UserResponse, PlatformWalletResponse, PlatformWalletWithPrivateKey
+from ..auth import get_current_user
+from ..database import get_db
+from ..models import PlatformWallet, User
+from ..schemas import UserCreate, UserResponse, PlatformWalletResponse, PlatformWalletWithPrivateKey
 from web3 import Web3
-import os
 
-router = APIRouter(prefix="/users", tags=["users"])
-
-# Simple token-based auth for now (in production, use JWT)
-def get_current_user(authorization: str = Header(None), db: Session = Depends(get_db)):
-    """Extract user from token (wallet address)"""
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Authorization header required")
-    
-    try:
-        # Token format: "Bearer 0x..."
-        token = authorization.split(" ")[1]
-        if not Web3.is_address(token):
-            raise HTTPException(status_code=401, detail="Invalid wallet address")
-        
-        user = db.query(User).filter(User.connected_wallet_address == token).first()
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-        return user
-    except IndexError:
-        raise HTTPException(status_code=401, detail="Invalid token format")
+router = APIRouter()
 
 
 @router.post("/register", response_model=UserResponse)
@@ -127,5 +108,6 @@ def create_user_platform_wallet(current_user: User = Depends(get_current_user), 
         "address": platform_wallet.address,
         "private_key": account.key.hex(),
         "balance": platform_wallet.balance,
-        "created_at": platform_wallet.created_at
+        "created_at": platform_wallet.created_at,
+        "custodial_warning": "Private key shown once. Server retains an encrypted copy.",
     }

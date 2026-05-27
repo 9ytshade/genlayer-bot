@@ -10,6 +10,10 @@ import { NETWORK_CONFIG } from '@/config';
 
 const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || 'YOUR_PROJECT_ID';
 
+if (!process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID && typeof window !== 'undefined') {
+  console.warn('NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID is not set. WalletConnect may not work in production.');
+}
+
 const bradburyChain: Chain = {
   id: NETWORK_CONFIG.bradbury.chainId,
   name: 'GenLayer Bradbury',

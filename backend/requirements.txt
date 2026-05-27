@@ -1,7 +1,8 @@
 fastapi
 uvicorn
 groq
-genlayer-py>=0.1.0,<0.6.0
+# Pin genlayer-py because deploy transaction internals are version-sensitive.
+genlayer-py==0.5.0
 python-dotenv
 pydantic>=2.4.0
 httpx
@@ -13,3 +14,10 @@ psycopg2-binary>=2.9.9
 web3>=6.0.0
 eth-abi>=4.0.0
 eth-utils>=2.0.0
+eth-account>=0.10.0
+siwe
+slowapi
+alembic
+pytest
+pytest-asyncio
+redis[asyncio]

@@ -1,10 +1,7 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 import asyncio
 
-try:
-    from ..logs_store import logs_store
-except ImportError:
-    from logs_store import logs_store
+from ..logs_store import logs_store
 
 router = APIRouter(prefix="/logs", tags=["logs"])
 

@@ -1,28 +1,18 @@
-from fastapi import APIRouter, HTTPException, Header, Query
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from web3 import Web3
 import os
 from typing import Any
 
-try:
-    from ..intent_parser import parse_intent
-    from ..contract_validation import validate_python_contract
-    from ..safety import validate_intent, normalize_intent
-    from ..simulator import simulate_intent
-    from ..genlayer_client import send_transfer, get_balance, get_client
-    from ..network_config import normalize_network
-except ImportError:
-    from intent_parser import parse_intent
-    from contract_validation import validate_python_contract
-    from safety import validate_intent, normalize_intent
-    from simulator import simulate_intent
-    from genlayer_client import send_transfer, get_balance, get_client
-    from network_config import normalize_network
-
-try:
-    from ..logs_store import logs_store
-except ImportError:
-    from logs_store import logs_store
+from ..auth import get_wallet_address_from_authorization
+from ..contract_validation import validate_python_contract
+from ..genlayer_client import get_balance, get_client
+from ..intent_parser import parse_intent
+from ..logs_store import logs_store
+from ..network_config import normalize_network
+from ..rate_limit import limiter
+from ..safety import normalize_intent, validate_intent
+from ..simulator import simulate_intent
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -86,28 +76,18 @@ class ContractValidationResponse(BaseModel):
 
 
 def get_wallet_address(authorization: str | None = Header(None)) -> str | None:
-    if not authorization or not authorization.startswith("Bearer "):
-        return None
-    token = authorization.split(" ", 1)[1].strip()
-    return token
+    return get_wallet_address_from_authorization(authorization)
 
 
 def resolve_balance_address(header_address: str | None) -> str:
     if header_address:
         return header_address
 
-    env_address = os.getenv("WALLET_ADDRESS")
+    env_address = os.getenv("ADMIN_WALLET_ADDRESS")
     if env_address:
         return env_address
 
     raise HTTPException(status_code=400, detail="No wallet address provided for balance lookup")
-
-
-def get_private_key_or_raise() -> str:
-    private_key = os.getenv("WALLET_PRIVATE_KEY")
-    if not private_key:
-        raise HTTPException(status_code=500, detail="Server wallet private key is not configured")
-    return private_key
 
 
 def resolve_network_or_400(network: str | None) -> str:
@@ -117,16 +97,17 @@ def resolve_network_or_400(network: str | None) -> str:
         raise HTTPException(status_code=400, detail=str(exc))
 
 @router.post("")
-async def handle_chat(request: ChatRequest):
-    network = resolve_network_or_400(request.network)
+@limiter.limit("10/minute")
+async def handle_chat(request: Request, chat_request: ChatRequest):
+    network = resolve_network_or_400(chat_request.network)
     await logs_store.append(
         "INFO",
         "CHAT_RECEIVED",
         "User message received.",
-        {"message": request.message, "wallet_address": request.wallet_address, "network": network},
+        {"message": chat_request.message, "wallet_address": chat_request.wallet_address, "network": network},
     )
 
-    intent = normalize_intent(parse_intent(request.message))
+    intent = normalize_intent(parse_intent(chat_request.message))
 
     if intent.get("action") == "deploy_contract" and intent.get("code"):
         validation = validate_python_contract(str(intent["code"]))
@@ -140,10 +121,10 @@ async def handle_chat(request: ChatRequest):
             }
             
     # Contextualize intent for the connected user
-    if request.wallet_address:
+    if chat_request.wallet_address:
         # If user asks "what's my balance", ensure we use their connected address
         if intent["action"] == "check_balance" and not intent.get("address"):
-            intent["address"] = request.wallet_address
+            intent["address"] = chat_request.wallet_address
             
     await logs_store.append("INFO", "INTENT_PARSED", "Intent parsed.", {"intent": intent})
 
@@ -218,6 +199,8 @@ async def confirm_action(request: ConfirmRequest, authorization: str | None = He
             raise HTTPException(status_code=502, detail=f"Balance fetch failed: {str(e)}")
 
     if intent["action"] == "transfer":
+        # Transfers are signed or broadcast by the connected user wallet on the frontend.
+        # The backend only verifies a tx hash/raw signed transaction and never signs with a server key.
         if not request.signed_transaction and not request.tx_hash:
             raise HTTPException(status_code=400, detail="Transfer requires tx_hash or signed_transaction from user wallet")
         try:
@@ -321,6 +304,15 @@ async def build_deploy_tx(request: DeployTxRequest) -> DeployTxResponse:
 
 @router.post("/validate-contract")
 async def validate_contract(request: ContractValidationRequest) -> ContractValidationResponse:
+    if request.file_name and not request.file_name.lower().endswith(".py"):
+        return ContractValidationResponse(
+            valid=False,
+            message="Only Python contract files with a .py extension can be deployed.",
+            errors=["Upload a Python .py file written as a GenLayer Intelligent Contract."],
+            warnings=[],
+            contract_names=[],
+        )
+
     validation = validate_python_contract(request.code)
     await logs_store.append(
         "INFO" if validation["valid"] else "ERROR",

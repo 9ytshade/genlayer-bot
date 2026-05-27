@@ -1,9 +1,10 @@
 'use client';
 
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { useAccount, useDisconnect, useSwitchChain, useWalletClient } from 'wagmi';
 import { useConnectModal } from '@rainbow-me/rainbowkit';
 import type { Address, Hash, Hex } from 'viem';
+import { clearStoredAuthToken, getNonce, getStoredAuthToken, setStoredAuthToken, verifySignature } from '@/lib/api';
 
 interface WalletTransactionRequest {
   to?: Address;
@@ -43,6 +44,58 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const account = address ?? null;
   const { data: walletClient } = useWalletClient();
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function authenticateWallet() {
+      if (!address || !walletClient) {
+        return;
+      }
+
+      const existingToken = getStoredAuthToken(address);
+      if (existingToken) {
+        setError(null);
+        return;
+      }
+
+      try {
+        const nonce = await getNonce(address);
+        const chainId = walletClient.chain?.id ?? 1;
+        const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+        const host = typeof window !== 'undefined' ? window.location.host : 'localhost:3000';
+        const message = [
+          `${host} wants you to sign in with your Ethereum account:`,
+          address,
+          '',
+          'Sign in to GenLayer Bot.',
+          '',
+          `URI: ${origin}`,
+          'Version: 1',
+          `Chain ID: ${chainId}`,
+          `Nonce: ${nonce}`,
+          `Issued At: ${new Date().toISOString()}`,
+        ].join('\n');
+        const signature = await walletClient.signMessage({ account: address, message });
+        const token = await verifySignature(address, message, signature);
+        if (!cancelled) {
+          setStoredAuthToken(address, token);
+          setError(null);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          const message = err instanceof Error ? err.message : 'Wallet authentication failed';
+          setError(message);
+          clearStoredAuthToken(address);
+        }
+      }
+    }
+
+    authenticateWallet();
+    return () => {
+      cancelled = true;
+    };
+  }, [address, walletClient]);
+
   const connect = async () => {
     setError(null);
     if (openConnectModal) {
@@ -53,6 +106,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   };
 
   const disconnect = () => {
+    clearStoredAuthToken(account);
     wagmiDisconnect();
   };
 

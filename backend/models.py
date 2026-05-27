@@ -1,9 +1,12 @@
 from sqlalchemy import Column, String, DateTime, ForeignKey, Float, Integer
 from sqlalchemy.orm import relationship
 from datetime import datetime
-from database import Base
+from .database import Base
 from cryptography.fernet import Fernet
+from dotenv import load_dotenv
 import os
+
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
 
 _raw_key = os.getenv("ENCRYPTION_KEY")
 if not _raw_key:
