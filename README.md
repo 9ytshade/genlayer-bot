@@ -6,38 +6,41 @@ The core rule of the app is simple: the bot never executes raw LLM output direct
 
 ## Current Features
 
-- Wallet connection with RainbowKit, wagmi, and viem
+- Wallet connection with RainbowKit, wagmi, viem, SIWE, and backend JWT sessions
 - Network support for GenLayer Studionet and Bradbury
 - Automatic wallet network switching from the app network selector
 - Wallet-scoped chat history stored per connected wallet
 - Desktop chat sidebar with New chat and previous chat sessions
 - Natural-language balance checks
-- Wallet-side token transfers using sendTransaction
+- Wallet-side token transfers using `sendTransaction`
 - Immediate balance refresh after successful transactions
 - Python contract upload flow for GenLayer intelligent contracts
-- Safeguards for non-.py uploads
+- Safeguards for non-`.py` uploads
 - Python syntax and structure validation before deployment
 - In-chat deploy parameter editor for constructor args, kwargs, value, gas limit, rotations, and leader-only mode
 - Studionet deployment transaction builder using the GenLayer consensus contract
 - Deployment result display with EVM tx hash, consensus tx id, contract address, and generated addresses
-- Live activity log panel
-- Command palette, quick actions, risk indicators, simulations, and retryable errors
-- Railway-ready backend and Vercel-ready frontend configuration
+- Live activity log panel with in-memory logs locally and optional Redis-backed logs in production
+- Render-ready backend deployment with Supabase Postgres
+- Vercel-ready frontend deployment
 
 ## Project Structure
 
 ```text
 genlayer-bot/
 |-- backend/
+|   |-- alembic/
 |   |-- routers/
 |   |   |-- chat.py
 |   |   |-- logs.py
 |   |   |-- users.py
 |   |   `-- wallet.py
+|   |-- tests/
 |   |-- .env.example
 |   |-- Dockerfile
 |   |-- Procfile
-|   |-- railway.json
+|   |-- alembic.ini
+|   |-- auth.py
 |   |-- contract_generator.py
 |   |-- contract_validation.py
 |   |-- database.py
@@ -47,6 +50,8 @@ genlayer-bot/
 |   |-- main.py
 |   |-- models.py
 |   |-- network_config.py
+|   |-- pyproject.toml
+|   |-- rate_limit.py
 |   |-- requirements.txt
 |   |-- safety.py
 |   |-- schemas.py
@@ -55,30 +60,12 @@ genlayer-bot/
 |   |-- public/
 |   |-- src/
 |   |   |-- app/
-|   |   |   |-- layout.tsx
-|   |   |   `-- page.tsx
 |   |   |-- components/
-|   |   |   |-- ChatInterface.tsx
-|   |   |   |-- CommandPalette.tsx
-|   |   |   |-- ConfirmationButtons.tsx
-|   |   |   |-- ConnectWalletButton.tsx
-|   |   |   |-- DeployContractPanel.tsx
-|   |   |   |-- IntentCard.tsx
-|   |   |   |-- LiveLogsPanel.tsx
-|   |   |   |-- Message.tsx
-|   |   |   |-- QuickActions.tsx
-|   |   |   |-- RiskIndicator.tsx
-|   |   |   |-- SimulationCard.tsx
-|   |   |   |-- WalletConnect.tsx
-|   |   |   `-- Web3Provider.tsx
 |   |   |-- context/
-|   |   |   `-- WalletContext.tsx
 |   |   |-- lib/
-|   |   |   `-- api.ts
 |   |   |-- config.ts
 |   |   `-- global.d.ts
 |   |-- .env.example
-|   |-- Procfile
 |   |-- next.config.ts
 |   |-- package.json
 |   |-- tsconfig.json
@@ -87,14 +74,15 @@ genlayer-bot/
 `-- README.md
 ```
 
-Local planning and handoff files such as fix.md, handover_prompt.md, and Build are ignored and should not be pushed.
+Local planning and handoff files such as `fix.md`, `handover_prompt.md`, `Fix Prompt.txt`, `Full Project Ananlysis.txt`, and `Build` are ignored and should not be pushed.
 
 ## Architecture
 
 ```text
 User chat input
   -> frontend chat UI
-  -> FastAPI /chat intent endpoint
+  -> FastAPI backend on Render
+  -> Supabase Postgres for persistent backend data
   -> Groq structured intent parsing
   -> safety validation
   -> simulation or deploy preparation
@@ -108,95 +96,106 @@ The frontend owns wallet interaction. The backend prepares safe transaction data
 
 ## Backend
 
-The backend is a FastAPI app in backend/.
+The backend is a FastAPI app in `backend/`.
 
 Important files:
 
-- main.py: FastAPI setup, CORS, health check, router registration
-- routers/chat.py: chat, confirmation, deploy transaction, validation, and tx parameter endpoints
-- routers/wallet.py: wallet balance and funding endpoints
-- genlayer_client.py: async JSON-RPC wrapper and GenLayer deployment transaction builder
-- contract_validation.py: Python contract validation
-- network_config.py: Studionet and Bradbury network selection
-- models.py and database.py: SQLAlchemy models and database setup
-- logs_store.py: in-memory live activity logs
+- `main.py`: FastAPI setup, CORS, health check, router registration, startup migrations
+- `auth.py`: SIWE nonce and signature verification, JWT issuing, authenticated user lookup
+- `routers/chat.py`: chat, confirmation, deploy transaction, validation, and tx parameter endpoints
+- `routers/wallet.py`: wallet balance and admin funding endpoints
+- `genlayer_client.py`: async JSON-RPC wrapper and GenLayer deployment transaction builder
+- `contract_validation.py`: Python contract validation
+- `database.py`, `models.py`, `alembic/`: SQLAlchemy models and migrations
+- `logs_store.py`: in-memory logs locally and Redis-backed logs when `REDIS_URL` is set
 
 ### Backend Setup
 
+Run the backend from the project root so `backend.main:app` resolves correctly:
+
 ```bash
-cd backend
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-copy .env.example .env
-python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
+cd "C:\Users\9ytshade\Documents\Genlayer Bot"
+python -m venv backend/.venv
+backend\.venv\Scripts\activate
+pip install -r backend/requirements.txt
+copy backend\.env.example backend\.env
+python -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-Use the equivalent activation command for macOS or Linux if you are not on Windows.
+Use the equivalent activation command for macOS or Linux if needed.
 
 ### Backend Environment Variables
 
 ```bash
+DATABASE_URL=sqlite:///./genlayer_bot.db
+ENCRYPTION_KEY=your_permanent_fernet_key
+JWT_SECRET=your_long_random_secret
 GROQ_API_KEY=your_groq_api_key_here
 
 GENLAYER_RPC_URL_STUDIONET=https://studio.genlayer.com/api
 GENLAYER_RPC_URL_BRADBURY=https://rpc-bradbury.genlayer.com
+GENLAYER_CHAIN_ID_STUDIONET=61999
+GENLAYER_CHAIN_ID_BRADBURY=4221
+GENLAYER_CONSENSUS_CONTRACT_ADDRESS=0xb7278A61aa25c888815aFC32Ad3cC52fF24fE575
 
-WALLET_PRIVATE_KEY=your_wallet_private_key_here
-WALLET_ADDRESS=your_wallet_address_here
+ADMIN_PRIVATE_KEY=
+ADMIN_WALLET_ADDRESS=
 MAX_TRANSFER_AMOUNT=1000
-
-DATABASE_URL=sqlite:///./genlayer_bot.db
-ENCRYPTION_KEY=your_permanent_fernet_key
-
-ALLOWED_ORIGINS=http://localhost:3000
+SUPPORTED_TOKENS=GEN
+ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+REDIS_URL=
 ```
 
-Generate ENCRYPTION_KEY once and keep it permanently:
+Generate `ENCRYPTION_KEY` once and keep it permanently:
 
 ```bash
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
-Do not rotate this key after encrypted data has been stored.
+Generate `JWT_SECRET`:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(64))"
+```
+
+Do not rotate `ENCRYPTION_KEY` after encrypted data has been stored.
 
 ## Frontend
 
-The frontend is a Next.js app in frontend/.
+The frontend is a Next.js app in `frontend/`.
 
 Important files:
 
-- src/app/page.tsx: app shell and activity panel layout
-- src/components/ChatInterface.tsx: chat orchestration, wallet-scoped chat history, sidebar, upload flow, confirmations
-- src/components/ConnectWalletButton.tsx: wallet dropdown and balance display
-- src/context/WalletContext.tsx: wallet connection, transaction sending, network switching, balance refresh signal
-- src/components/DeployContractPanel.tsx: deployment parameter editor
-- src/lib/api.ts: API client functions
-- src/config.ts: frontend API and chain configuration
+- `src/components/ChatInterface.tsx`: chat orchestration, wallet-scoped chat history, sidebar, upload flow, confirmations
+- `src/components/ConnectWalletButton.tsx`: wallet dropdown and balance display
+- `src/context/WalletContext.tsx`: wallet connection, SIWE authentication, transaction sending, network switching, balance refresh signal
+- `src/components/DeployContractPanel.tsx`: deployment parameter editor
+- `src/lib/api.ts`: API client functions
+- `src/config.ts`: frontend API and chain configuration
 
 ### Frontend Setup
 
 ```bash
 cd frontend
 npm install
-npm run dev
+npm run dev -- --hostname 127.0.0.1 --port 3000
 ```
 
 Default local URLs:
 
-- Frontend: http://localhost:3000
-- Backend: http://localhost:8000
-- API docs: http://localhost:8000/docs
+- Frontend: `http://127.0.0.1:3000`
+- Backend: `http://127.0.0.1:8000`
+- API docs: `http://127.0.0.1:8000/docs`
 
 ### Frontend Environment Variables
 
 ```bash
-NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
 NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=your_walletconnect_project_id
-NEXT_PUBLIC_GENLAYER_RPC_URL_STUDIONET=https://studio.genlayer.com/api
-NEXT_PUBLIC_GENLAYER_CHAIN_ID_STUDIONET=61999
-NEXT_PUBLIC_GENLAYER_RPC_URL_BRADBURY=https://rpc-bradbury.genlayer.com
-NEXT_PUBLIC_GENLAYER_CHAIN_ID_BRADBURY=4221
+NEXT_PUBLIC_STUDIONET_CHAIN_ID=61999
+NEXT_PUBLIC_STUDIONET_RPC=https://studio.genlayer.com/api
+NEXT_PUBLIC_BRADBURY_CHAIN_ID=4221
+NEXT_PUBLIC_BRADBURY_RPC=https://rpc-bradbury.genlayer.com
 ```
 
 ## Main User Flows
@@ -204,10 +203,11 @@ NEXT_PUBLIC_GENLAYER_CHAIN_ID_BRADBURY=4221
 ### Check Balance
 
 1. User connects a wallet.
-2. User selects Studionet or Bradbury.
-3. User asks for balance in chat or opens the wallet dropdown.
-4. Backend reads native balance from the selected RPC.
-5. UI shows the result and keeps the wallet badge current.
+2. User signs the SIWE message once for backend JWT auth.
+3. User selects Studionet or Bradbury.
+4. User asks for balance in chat or opens the wallet dropdown.
+5. Backend reads native balance from the selected RPC.
+6. UI shows the result and keeps the wallet badge current.
 
 ### Send Tokens
 
@@ -221,8 +221,8 @@ NEXT_PUBLIC_GENLAYER_CHAIN_ID_BRADBURY=4221
 
 ### Deploy Intelligent Contract
 
-1. User uploads a .py contract file.
-2. Frontend rejects non-.py files immediately.
+1. User uploads a `.py` contract file.
+2. Frontend and backend reject non-`.py` files.
 3. Backend validates Python syntax and basic contract structure.
 4. Chat shows deployment parameters for review.
 5. Backend builds the Studionet consensus-contract transaction.
@@ -231,59 +231,101 @@ NEXT_PUBLIC_GENLAYER_CHAIN_ID_BRADBURY=4221
 
 ### Chat History
 
-Chat history is stored client-side in localStorage, scoped by connected wallet address. Refreshing the app restores the current wallet's chats. Connecting a different wallet loads that wallet's own chat list, so users do not see another wallet's conversations in the same browser.
+Chat history is stored client-side in `localStorage`, scoped by connected wallet address. Refreshing the app restores the current wallet's chats. Connecting a different wallet loads that wallet's own chat list, so users do not see another wallet's conversations in the same browser.
 
 ## Deployment
 
-### Backend on Railway
+Production deployment uses:
 
-The backend contains:
+- Backend: Render web service
+- Database: Supabase Postgres
+- Frontend: Vercel or any static/Next.js host
 
-- backend/Procfile
-- backend/Dockerfile
-- backend/railway.json
-- /health endpoint for health checks
+### Supabase Postgres
 
-Railway variables should include:
+1. Create a Supabase project.
+2. Open `Project Settings -> Database -> Connection string`.
+3. Copy the Postgres connection string.
+4. Replace the password placeholder with your database password.
+5. URL-encode special characters in the password.
+6. Add `?sslmode=require` if it is not already present.
+
+Example:
 
 ```bash
-GROQ_API_KEY=...
-GENLAYER_RPC_URL_STUDIONET=https://studio.genlayer.com/api
-GENLAYER_RPC_URL_BRADBURY=https://rpc-bradbury.genlayer.com
-WALLET_PRIVATE_KEY=...
-WALLET_ADDRESS=...
-MAX_TRANSFER_AMOUNT=1000
-DATABASE_URL=sqlite:///./genlayer_bot.db
-ENCRYPTION_KEY=...
-ALLOWED_ORIGINS=https://your-vercel-domain.vercel.app
+DATABASE_URL=postgresql://postgres.project_ref:encoded_password@host:5432/postgres?sslmode=require
 ```
 
-The Dockerfile binds to Railway's dynamic PORT.
+### Backend on Render
+
+Render settings:
+
+```text
+Root Directory: .
+Build Command: pip install -r backend/requirements.txt
+Start Command: python -m uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+```
+
+Render environment variables:
+
+```bash
+DATABASE_URL=your_supabase_postgres_url
+ENCRYPTION_KEY=your_existing_encryption_key
+JWT_SECRET=your_jwt_secret
+GROQ_API_KEY=your_groq_key
+GENLAYER_RPC_URL_STUDIONET=https://studio.genlayer.com/api
+GENLAYER_RPC_URL_BRADBURY=https://rpc-bradbury.genlayer.com
+GENLAYER_CHAIN_ID_STUDIONET=61999
+GENLAYER_CHAIN_ID_BRADBURY=4221
+GENLAYER_CONSENSUS_CONTRACT_ADDRESS=0xb7278A61aa25c888815aFC32Ad3cC52fF24fE575
+ADMIN_PRIVATE_KEY=
+ADMIN_WALLET_ADDRESS=
+MAX_TRANSFER_AMOUNT=1000
+SUPPORTED_TOKENS=GEN
+ALLOWED_ORIGINS=https://your-frontend-domain.com,http://localhost:3000,http://127.0.0.1:3000
+REDIS_URL=
+PYTHONUNBUFFERED=1
+```
+
+After deployment, verify:
+
+```text
+https://your-render-backend.onrender.com/health
+```
+
+Expected response:
+
+```json
+{"status":"healthy"}
+```
 
 ### Frontend on Vercel
 
-Set the frontend root directory to frontend.
+Set the frontend root directory to `frontend`.
 
-Vercel variables should include:
+Frontend environment variables:
 
 ```bash
-NEXT_PUBLIC_API_URL=https://your-railway-backend-url
-NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=...
-NEXT_PUBLIC_GENLAYER_RPC_URL_STUDIONET=https://studio.genlayer.com/api
-NEXT_PUBLIC_GENLAYER_CHAIN_ID_STUDIONET=61999
-NEXT_PUBLIC_GENLAYER_RPC_URL_BRADBURY=https://rpc-bradbury.genlayer.com
-NEXT_PUBLIC_GENLAYER_CHAIN_ID_BRADBURY=4221
+NEXT_PUBLIC_API_URL=https://your-render-backend.onrender.com
+NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=your_walletconnect_project_id
+NEXT_PUBLIC_STUDIONET_CHAIN_ID=61999
+NEXT_PUBLIC_STUDIONET_RPC=https://studio.genlayer.com/api
+NEXT_PUBLIC_BRADBURY_CHAIN_ID=4221
+NEXT_PUBLIC_BRADBURY_RPC=https://rpc-bradbury.genlayer.com
 ```
 
-Also add the Vercel domain to WalletConnect Cloud allowed domains.
+Also add the frontend domain to:
+
+- Render `ALLOWED_ORIGINS`
+- WalletConnect Cloud allowed domains
 
 ## Verification Commands
 
 Backend:
 
 ```bash
-cd backend
-python -m py_compile main.py genlayer_client.py contract_validation.py safety.py simulator.py routers/chat.py routers/wallet.py
+python -m py_compile backend/main.py backend/genlayer_client.py backend/contract_validation.py backend/safety.py backend/simulator.py backend/routers/chat.py backend/routers/wallet.py
+python -m pytest backend/tests -q
 ```
 
 Frontend:
@@ -291,17 +333,17 @@ Frontend:
 ```bash
 cd frontend
 npm run lint
-npx tsc --noEmit
 npm run build
 ```
 
 ## Security Notes
 
-- Never commit .env files, private keys, generated encryption keys, or wallet secrets.
-- WALLET_PRIVATE_KEY is server-side only and should never be exposed to the frontend.
-- ENCRYPTION_KEY must be stable and permanent.
-- The current auth model trusts connected wallet addresses from the client. Before handling real funds or public production usage, add signed-message authentication with server-issued nonces.
-- Contract uploads are validated for file type and Python structure, but deeper semantic auditing is still a future hardening step.
+- Never commit `.env` files, private keys, generated encryption keys, JWT secrets, or wallet secrets.
+- `ADMIN_PRIVATE_KEY` is server-side only and should never be exposed to the frontend.
+- `ENCRYPTION_KEY` must be stable and permanent.
+- Backend auth uses SIWE nonces and JWTs; do not replace it with raw wallet-address bearer tokens.
+- Contract uploads are validated for file type and Python structure, but deeper semantic auditing is still future hardening.
+- Use Supabase RLS policies if you expose any tables through Supabase APIs.
 
 ## Current Status
 
@@ -310,6 +352,9 @@ Completed:
 - Balance checking
 - Token transfers
 - Wallet-side transaction broadcasting
+- SIWE authentication and backend JWT sessions
+- Supabase Postgres database target
+- Render backend deployment support
 - Studionet deploy transaction builder
 - Python contract upload and validation
 - Deploy parameter UI
@@ -317,14 +362,13 @@ Completed:
 - Wallet-scoped chat history
 - Desktop chat sidebar
 - Automatic wallet network switching
-- Railway backend deployment support
 - Vercel frontend deployment support
 
 Planned hardening:
 
-- Signed-message authentication
 - Persistent server-side chat history
 - Database-backed transaction history
+- Production Redis for logs and live activity events
 - Better semantic validation for intelligent contracts
 - Production-grade observability and alerting
 

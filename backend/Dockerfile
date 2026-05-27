@@ -17,7 +17,7 @@ RUN pip install --no-cache-dir -r backend/requirements.txt
 # Copy backend code
 COPY . backend/
 
-# Expose Railway runtime port
+# Expose the web service port used by Render and local Docker runs
 EXPOSE 8080
 
 # Run the application
