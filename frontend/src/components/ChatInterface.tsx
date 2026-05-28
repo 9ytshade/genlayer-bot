@@ -7,7 +7,7 @@ import CommandPalette from './CommandPalette';
 import ConnectWalletButton from './ConnectWalletButton';
 import type { Intent } from '../lib/api';
 import { MessageData, sendMessage, confirmAction, buildTransferTx, buildDeployTx, validateContractFile, getChatHistory, saveChatHistory, getStoredAuthToken } from '../lib/api';
-import { Send, Bot, Loader2, Command, FileText, Plus, MessageSquare } from 'lucide-react';
+import { SendHorizontal, Bot, Loader2, Command, FileUp, Plus, MessageSquare } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useWallet } from '@/context/WalletContext';
 import { useChainId } from 'wagmi';
@@ -753,14 +753,14 @@ export default function ChatInterface() {
   if (!isMounted) return null;
 
   return (
-    <div className="flex h-full min-h-0 w-full mx-auto overflow-hidden bg-bg-base border-none md:border-x border-border-default relative">
-      <aside className="hidden lg:flex w-[280px] min-h-0 shrink-0 flex-col border-r border-border-default bg-bg-elevated">
-        <div className="border-b border-border-strong p-4">
+    <div className="relative mx-auto flex h-full min-h-0 w-full overflow-hidden bg-bg-base">
+      <aside className="hidden min-h-0 w-[320px] shrink-0 flex-col border-r border-border-default bg-bg-elevated lg:flex">
+        <div className="border-b border-border-default px-6 py-5">
           <button
             type="button"
             onClick={handleCreateNewChat}
             disabled={!connectedWallet || isLoading}
-            className="flex w-full items-center justify-between border border-border-strong bg-black px-4 py-3 text-left text-[11px] font-mono uppercase tracking-widest text-text-primary transition-colors hover:border-accent-primary hover:text-accent-primary disabled:cursor-not-allowed disabled:opacity-50"
+            className="control-button flex w-full items-center justify-between rounded-full px-5 py-3.5 text-left font-mono text-[11px] font-semibold uppercase tracking-[0.08em] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]"
             title="Start new chat"
           >
             <span className="flex items-center gap-3">
@@ -771,10 +771,8 @@ export default function ChatInterface() {
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
-          <div className="mb-3 px-2 text-[10px] uppercase tracking-widest text-text-muted font-mono">
-            Chats
-          </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6">
+          <div className="micro-label mb-4 px-2">Chats</div>
           {connectedWallet ? (
             <div className="space-y-1">
               {chats.map((chat) => (
@@ -782,15 +780,15 @@ export default function ChatInterface() {
                   key={chat.id}
                   type="button"
                   onClick={() => handleSelectChat(chat.id)}
-                  className={`group flex w-full items-center gap-3 border px-3 py-2.5 text-left transition-colors ${
+                  className={`group flex w-full items-center gap-3 rounded-[12px] border px-4 py-3 text-left transition-colors ${
                     chat.id === currentChatId
-                      ? 'border-accent-primary/60 bg-accent-primary/10 text-text-primary'
+                      ? 'border-accent-primary/70 bg-accent-primary/10 text-text-primary'
                       : 'border-transparent text-text-secondary hover:border-border-strong hover:bg-bg-base hover:text-text-primary'
                   }`}
                   title={chat.title}
                 >
                   <MessageSquare size={14} className="shrink-0 text-text-muted group-hover:text-accent-primary" />
-                  <span className="min-w-0 flex-1 truncate text-[12px] font-mono">
+                  <span className="min-w-0 flex-1 truncate font-mono text-[12px]">
                     {chat.title}
                   </span>
                 </button>
@@ -803,8 +801,8 @@ export default function ChatInterface() {
           )}
         </div>
 
-        <div className="border-t border-border-strong p-4">
-          <div className="truncate text-[10px] uppercase tracking-widest text-text-muted font-mono">
+        <div className="border-t border-border-default p-5">
+          <div className="micro-label truncate">
             {connectedWallet ? `${connectedWallet.slice(0, 8)}...${connectedWallet.slice(-6)}` : 'No wallet connected'}
           </div>
         </div>
@@ -812,32 +810,32 @@ export default function ChatInterface() {
 
       <div className="flex min-w-0 flex-1 flex-col">
       {/* Header */}
-      <div className="h-14 border-b border-border-strong bg-bg-elevated flex items-center justify-between px-6 shrink-0 z-10">
-        <div className="flex items-center gap-3">
-          <div className="w-6 h-6 bg-accent-primary flex items-center justify-center text-black font-bold">
+      <div className="z-10 flex min-h-[4.75rem] shrink-0 items-center justify-between gap-4 border-b border-border-default bg-bg-elevated px-6 py-4 md:px-8">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border-strong bg-bg-base text-accent-primary">
             <Bot size={16} />
           </div>
-          <div>
-            <h1 className="font-display text-[15px] font-semibold text-text-primary tracking-tight">AI Agent</h1>
+          <div className="min-w-0">
+            <h1 className="truncate font-display text-[15px] font-semibold tracking-tight text-text-primary">Active chat</h1>
             {connectedWallet && (
-              <p className="text-[10px] text-text-muted font-mono mt-0.5">
+              <p className="mt-0.5 truncate font-mono text-[10px] text-text-muted">
                 {currentChat?.title || 'New chat'} - {connectedWallet.slice(0, 10)}...{connectedWallet.slice(-8)}
               </p>
             )}
           </div>
         </div>
         
-         <div className="flex items-center gap-2">
+         <div className="flex min-w-0 items-center gap-3">
            <button
              type="button"
              onClick={handleCreateNewChat}
              disabled={!connectedWallet || isLoading}
-             className="flex lg:hidden items-center justify-center p-2 border border-border-strong hover:border-accent-primary text-text-secondary hover:text-accent-primary disabled:opacity-50 disabled:cursor-not-allowed transition-colors rounded-none"
+             className="control-button flex items-center justify-center rounded-full p-2.5 lg:hidden"
              title="Start new chat"
            >
              <Plus size={14} />
            </button>
-           <label htmlFor="network-select" className="text-[10px] uppercase tracking-widest text-text-muted font-mono">
+           <label htmlFor="network-select" className="micro-label hidden sm:block">
              Network
            </label>
            <select
@@ -846,7 +844,7 @@ export default function ChatInterface() {
              onChange={(e) => {
                void handleNetworkChange(e.target.value as NetworkKey);
              }}
-             className="bg-black border border-border-strong px-2 py-1 text-[11px] font-mono text-text-secondary focus:outline-none focus:border-accent-primary"
+             className="field-input max-w-[120px] rounded-full px-3 py-2 font-mono text-[11px] text-text-secondary sm:max-w-none"
            >
              {Object.entries(NETWORK_CONFIG).map(([key, cfg]) => (
                <option key={key} value={key}>
@@ -859,14 +857,14 @@ export default function ChatInterface() {
       </div>
 
       {/* Chat Area */}
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-6 md:px-12 md:py-10 space-y-8 md:space-y-10 scroll-smooth">
+      <div className="min-h-0 flex-1 space-y-9 overflow-y-auto overscroll-contain px-7 py-8 scroll-smooth md:px-12 md:py-11 xl:px-16">
         {!connectedWallet && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg"
+            className="panel-soft rounded-[12px] p-5"
           >
-            <p className="text-yellow-800 text-sm font-medium">
+            <p className="text-sm font-medium text-accent-warning">
               Please connect your wallet to get started.
             </p>
           </motion.div>
@@ -882,12 +880,12 @@ export default function ChatInterface() {
            </motion.div>
          )}
          {connectedWallet && (
-           <div className="text-[10px] uppercase tracking-widest text-text-muted font-mono">
+           <div className="micro-label px-2 py-1">
              Active network: {NETWORK_CONFIG[selectedNetwork].label}
            </div>
          )}
          {connectedWallet && isNetworkMismatch && (
-           <div className="rounded-xl border border-yellow-400/60 bg-yellow-50 px-3 py-2 text-[11px] font-mono text-yellow-900">
+           <div className="rounded-[12px] border border-accent-warning/60 bg-accent-warning/10 px-4 py-3 font-mono text-[11px] text-accent-warning">
              Wallet is connected to the wrong chain. Please switch your wallet to {NETWORK_CONFIG[selectedNetwork].label} or use the wallet prompt to switch networks.
            </div>
          )}
@@ -907,14 +905,14 @@ export default function ChatInterface() {
             <motion.div 
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="flex gap-4 max-w-3xl"
+              className="flex max-w-3xl gap-4"
             >
-              <div className="shrink-0 w-9 h-9 rounded-xl bg-slate-900/90 border border-white/15 text-text-secondary flex items-center justify-center shadow-sm">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border-strong bg-bg-elevated text-text-secondary shadow-sm">
                 <Bot size={16} />
               </div>
               <div className="flex flex-col gap-1 items-start">
-                <span className="text-xs text-text-muted font-medium ml-1">GenLayer AI</span>
-                <div className="px-4 py-3 rounded-2xl bg-white/4 border border-white/10 rounded-tl-md shadow-sm flex items-center gap-2 backdrop-blur-md">
+                <span className="ml-1 text-xs font-medium text-text-muted">GenLayer AI</span>
+                <div className="message-card flex items-center gap-2 px-4 py-3">
                   <div className="flex gap-1">
                     <span className="w-2 h-2 rounded-full bg-accent-primary/60 animate-bounce delay-0" />
                     <span className="w-2 h-2 rounded-full bg-accent-primary/60 animate-bounce delay-150" />
@@ -929,16 +927,16 @@ export default function ChatInterface() {
       </div>
 
       {/* Input Area */}
-      <div className="p-6 md:px-12 bg-bg-base border-t border-border-strong shrink-0">
-        <form onSubmit={handleSubmit} className="relative flex items-center gap-2 w-full mx-auto">
+      <div className="shrink-0 border-t border-border-default bg-bg-base px-7 py-5 md:px-12 xl:px-16">
+        <form onSubmit={handleSubmit} className="panel-soft relative mx-auto flex w-full items-center gap-2 rounded-full p-2 shadow-[0_18px_50px_rgba(0,0,0,0.24)]">
           <button
             type="button"
             onClick={() => setCommandPaletteOpen(true)}
             disabled={!connectedWallet}
-            className="hidden md:flex items-center justify-center p-2 border border-border-strong hover:border-accent-primary text-text-secondary hover:text-accent-primary disabled:opacity-50 disabled:cursor-not-allowed transition-colors rounded-none"
+            className="control-button hidden h-10 w-10 items-center justify-center rounded-full bg-accent-cyan/8 text-accent-cyan md:flex"
             title={connectedWallet ? "Open command palette (Cmd+K)" : "Connect wallet first"}
           >
-            <Command size={14} />
+            <Command size={16} />
           </button>
 
           <input
@@ -953,10 +951,10 @@ export default function ChatInterface() {
             type="button"
             onClick={() => fileInputRef.current?.click()}
             disabled={!connectedWallet || isLoading}
-            className="flex items-center justify-center p-2 border border-border-strong hover:border-accent-primary text-text-secondary hover:text-accent-primary disabled:opacity-50 disabled:cursor-not-allowed transition-colors rounded-none"
+            className="control-button flex h-10 w-10 items-center justify-center rounded-full bg-accent-primary/8 text-accent-primary"
             title="Upload Intelligent Contract (.py)"
           >
-            <FileText size={14} />
+            <FileUp size={16} />
           </button>
 
           <input
@@ -971,28 +969,28 @@ export default function ChatInterface() {
               }
             }}
             placeholder={connectedWallet ? "> Type a command..." : "Connect wallet to chat..."}
-            className="flex-1 bg-bg-surface border border-border-strong py-3.5 pl-4 pr-14 text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-primary focus:ring-1 focus:ring-accent-primary transition-colors font-mono text-sm rounded-none"
+            className="min-h-10 flex-1 border-none bg-transparent px-3 font-mono text-sm text-text-primary placeholder:text-text-muted focus:outline-none"
             disabled={!connectedWallet || isLoading || messages.some(m => m.status === 'awaiting_confirmation' || m.status === 'executing')}
           />
           <button
             type="submit"
             disabled={!connectedWallet || !input.trim() || isLoading || isNetworkMismatch || messages.some(m => m.status === 'awaiting_confirmation' || m.status === 'executing')}
-            className="absolute right-2 p-2 bg-accent-primary text-black hover:bg-white disabled:opacity-50 disabled:bg-border-strong disabled:text-text-muted transition-colors flex items-center justify-center rounded-none"
+            className="primary-action flex h-10 w-10 items-center justify-center rounded-full disabled:opacity-50"
             title={!connectedWallet ? "Connect wallet to send messages" : isNetworkMismatch ? `Switch wallet to ${NETWORK_CONFIG[selectedNetwork].label}` : ""}
           >
             {isLoading ? (
               <Loader2 size={16} className="animate-spin" />
             ) : (
-              <Send size={16} />
+              <SendHorizontal size={17} />
             )}
           </button>
         </form>
         {uploadError && (
-          <div className="mt-3 border border-accent-danger bg-accent-danger/10 px-3 py-2 text-[11px] text-accent-danger">
+          <div className="mt-3 rounded-[8px] border border-accent-danger bg-accent-danger/10 px-3 py-2 text-[11px] text-accent-danger">
             {uploadError}
           </div>
         )}
-        <div className="flex justify-between mt-2 text-[10px] text-text-muted font-mono uppercase tracking-widest px-1">
+        <div className="mt-2 flex justify-between px-1 font-mono text-[10px] uppercase tracking-[0.08em] text-text-muted">
           <span>Mode: Natural Language</span>
           <span className="hidden md:block">Cmd+K: Commands</span>
           <span>Security: Active</span>

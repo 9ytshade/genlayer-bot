@@ -15,17 +15,19 @@ export default function QuickActions({ onSelectAction }: QuickActionsProps) {
   ];
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+    <div className="flex flex-wrap gap-4 px-2 pb-1 pt-1">
       {actions.map((action) => {
         const Icon = action.icon;
         return (
           <button
             key={action.label}
             onClick={() => onSelectAction(action.command)}
-            className="flex items-center gap-2 p-3 bg-bg-elevated border border-border-strong hover:border-accent-primary hover:bg-accent-primary/5 rounded text-left transition-all duration-200 group"
+            className="control-button group flex min-h-12 items-center gap-3 rounded-full px-6 py-3.5 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]"
           >
-            <Icon size={14} className="text-accent-primary flex-shrink-0 group-hover:scale-110 transition-transform" />
-            <span className="text-[11px] font-mono uppercase tracking-widest font-bold text-text-primary group-hover:text-accent-primary">
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent-primary/12 text-accent-primary transition-transform group-hover:scale-105">
+              <Icon size={15} />
+            </span>
+            <span className="font-mono text-[11px] font-bold uppercase tracking-[0.08em] text-text-primary group-hover:text-accent-primary">
               {action.label}
             </span>
           </button>

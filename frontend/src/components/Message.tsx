@@ -4,7 +4,7 @@ import IntentCard from './IntentCard';
 import SimulationCard from './SimulationCard';
 import ConfirmationButtons from './ConfirmationButtons';
 import DeployContractPanel from './DeployContractPanel';
-import { Terminal, User, Check, Loader2, Copy, AlertCircle, RefreshCw } from 'lucide-react';
+import { Bot, UserRound, Check, Loader2, Copy, AlertCircle, RefreshCw } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 interface MessageProps {
@@ -44,35 +44,35 @@ export default function Message({ msg, onConfirm, onCancel, onUpdateIntent, onRu
     <motion.div
       initial={{ opacity: 0, y: 15, scale: 0.98 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
-      transition={{ type: "spring", stiffness: 400, damping: 25 }}
-      className={`flex gap-4 max-w-3xl ${isUser ? 'ml-auto flex-row-reverse' : ''}`}
+      transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+      className={`flex w-full max-w-3xl gap-4 px-1 sm:gap-5 sm:px-2 ${isUser ? 'ml-auto flex-row-reverse' : ''}`}
     >
-      <div className={`shrink-0 w-8 h-8 flex items-center justify-center border ${isUser ? 'bg-accent-primary text-black border-accent-primary' : 'bg-black border-border-strong text-text-secondary'}`}>
-        {isUser ? <User size={14} /> : <Terminal size={14} />}
+      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border ${isUser ? 'border-accent-primary bg-accent-primary text-black' : 'border-border-strong bg-bg-elevated text-accent-cyan'}`}>
+        {isUser ? <UserRound size={17} /> : <Bot size={17} />}
       </div>
       
-      <div className={`flex flex-col gap-1 max-w-[85%] ${isUser ? 'items-end' : 'items-start'}`}>
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] text-text-muted font-mono uppercase tracking-widest">
-            {isUser ? 'USER_INPUT' : 'SYS_RESPONSE'}
+      <div className={`flex max-w-[88%] flex-col gap-2 sm:max-w-[85%] ${isUser ? 'items-end' : 'items-start'}`}>
+        <div className="flex items-center gap-2 px-1">
+          <span className="micro-label">
+            {isUser ? 'You' : 'Agent'}
           </span>
-          <span className="text-[9px] text-text-muted font-mono opacity-60">{formatTime(msg.id)}</span>
+          <span className="font-mono text-[9px] text-text-muted opacity-60">{formatTime(msg.id)}</span>
         </div>
         
-        <div className={`px-6 py-4 border ${isUser ? 'bg-accent-primary text-black border-accent-primary rounded-none shadow-[0_0_15px_rgba(255,176,0,0.15)]' : 'bg-bg-elevated border-border-strong text-text-primary rounded-none'}`}>
-          <p className="text-[14px] leading-relaxed whitespace-pre-wrap font-sans">{msg.content}</p>
+        <div className={`px-6 py-[1.125rem] sm:px-7 sm:py-5 ${isUser ? 'message-card-user' : 'message-card text-text-primary'}`}>
+          <p className="whitespace-pre-wrap break-words text-[14px] leading-relaxed">{msg.content}</p>
         </div>
 
         {!isUser && msg.helpCommands && msg.helpCommands.length > 0 && (
-          <div className="grid w-full gap-2 mt-2 sm:grid-cols-2">
+          <div className="mt-2 grid w-full gap-2 sm:grid-cols-2">
             {msg.helpCommands.map((command) => (
               <button
                 key={command.label}
                 type="button"
                 onClick={() => onRunCommand?.(command.command)}
-                className="border border-border-strong bg-black px-3 py-3 text-left transition-colors hover:border-accent-primary hover:bg-accent-primary/10 group"
+                className="control-button group rounded-[8px] px-3 py-3 text-left"
               >
-                <div className="text-[11px] font-mono font-bold uppercase tracking-widest text-accent-primary group-hover:text-white">
+                <div className="font-mono text-[11px] font-bold uppercase tracking-[0.08em] text-accent-primary group-hover:text-white">
                   {command.label}
                 </div>
                 <div className="mt-1 text-[10px] leading-relaxed text-text-muted">
@@ -117,23 +117,23 @@ export default function Message({ msg, onConfirm, onCancel, onUpdateIntent, onRu
         )}
 
         {!isUser && msg.status === 'executing' && (
-          <div className="flex items-center gap-2 mt-3 text-[11px] font-mono text-accent-primary uppercase tracking-widest animate-pulse">
+          <div className="mt-3 flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.08em] text-accent-primary">
             <Loader2 size={12} className="animate-spin" />
-            Executing_Transaction...
+            Executing transaction
           </div>
         )}
 
         {!isUser && msg.status === 'success' && msg.txHash && (
-          <div className="mt-3 p-3 bg-accent-success/10 border border-accent-success text-accent-success text-[11px] font-mono flex flex-col gap-2 w-full ticket-border">
-            <div className="flex items-center gap-2 uppercase tracking-widest font-bold">
+          <div className="data-card mt-3 flex w-full flex-col gap-2 p-3 font-mono text-[11px] text-accent-success">
+            <div className="flex items-center gap-2 font-bold uppercase tracking-[0.08em]">
               <Check size={14} />
-              Tx_Success
+              Transaction success
             </div>
-            <div className="opacity-80 pl-6 break-all flex items-center justify-between gap-2">
+            <div className="flex items-center justify-between gap-2 break-all pl-6 opacity-85">
               <span>{isRealTxHash ? `HASH: ${msg.txHash}` : msg.txHash}</span>
               <button
                 onClick={() => handleCopyHash(msg.txHash!)}
-                className="ml-2 p-1 hover:bg-accent-success/20 rounded transition-colors"
+                className="control-button ml-2 rounded-[6px] p-1"
                 title="Copy transaction hash"
               >
                 <Copy size={12} className={copied ? 'text-accent-primary' : ''} />
@@ -146,12 +146,12 @@ export default function Message({ msg, onConfirm, onCancel, onUpdateIntent, onRu
             )}
             {msg.contractAddress && (
               <div className="pl-6">
-                <div className="mb-1 uppercase tracking-widest">CONTRACT_ADDRESS</div>
+                <div className="mb-1 uppercase tracking-[0.08em]">Contract address</div>
                 <div className="flex items-center justify-between gap-2 break-all">
                   <span>{msg.contractAddress}</span>
                   <button
                     onClick={() => handleCopyAddress(msg.contractAddress!)}
-                    className="ml-2 p-1 hover:bg-accent-success/20 rounded transition-colors"
+                    className="control-button ml-2 rounded-[6px] p-1"
                     title="Copy contract address"
                   >
                     <Copy size={12} className={copiedAddress === msg.contractAddress ? 'text-accent-primary' : ''} />
@@ -161,8 +161,8 @@ export default function Message({ msg, onConfirm, onCancel, onUpdateIntent, onRu
             )}
             {msg.derivedAddresses && msg.derivedAddresses.length > 0 && (
               <div className="pl-6">
-                <div className="mb-1 uppercase tracking-widest">GENERATED_ADDRESSES</div>
-                <div className="mb-2 text-[11px] normal-case tracking-normal text-text-muted">
+                <div className="mb-1 uppercase tracking-[0.08em]">Generated addresses</div>
+                <div className="mb-2 text-[11px] normal-case text-text-muted">
                   Use these addresses as parameters when deploying dependent contracts.
                 </div>
                 <div className="flex flex-col gap-2">
@@ -171,7 +171,7 @@ export default function Message({ msg, onConfirm, onCancel, onUpdateIntent, onRu
                       <span>{address}</span>
                       <button
                         onClick={() => handleCopyAddress(address)}
-                        className="ml-2 p-1 hover:bg-accent-success/20 rounded transition-colors"
+                        className="control-button ml-2 rounded-[6px] p-1"
                         title="Copy derived address"
                       >
                         <Copy size={12} className={copiedAddress === address ? 'text-accent-primary' : ''} />
@@ -186,30 +186,30 @@ export default function Message({ msg, onConfirm, onCancel, onUpdateIntent, onRu
                 href={txExplorerUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="pl-6 text-[10px] uppercase tracking-widest text-accent-success hover:text-white transition-colors"
+                className="pl-6 text-[10px] uppercase tracking-[0.08em] text-accent-success transition-colors hover:text-white"
               >
-                [VIEW_ON_EXPLORER]
+                View on explorer
               </a>
             )}
           </div>
         )}
 
         {!isUser && msg.status === 'error' && (
-          <div className="mt-3 p-3 bg-accent-danger/10 border border-accent-danger text-accent-danger text-[11px] font-mono flex flex-col gap-2 w-full ticket-border">
-            <div className="flex items-center gap-2 uppercase tracking-widest font-bold">
+          <div className="data-card mt-3 flex w-full flex-col gap-2 border-accent-danger/70 bg-accent-danger/10 p-3 font-mono text-[11px] text-accent-danger">
+            <div className="flex items-center gap-2 font-bold uppercase tracking-[0.08em]">
               <AlertCircle size={14} />
               Error
             </div>
-            <div className="opacity-80 pl-6 normal-case tracking-normal">
+            <div className="pl-6 normal-case opacity-85">
               {msg.content}
             </div>
             {msg.intent ? (
               <button
                 onClick={() => onConfirm(msg.id)}
-                className="mt-2 flex items-center justify-center gap-2 py-2 px-3 bg-accent-danger/20 hover:bg-accent-danger/30 border border-accent-danger text-accent-danger font-mono text-[10px] uppercase tracking-widest transition-colors"
+                className="control-button mt-2 flex items-center justify-center gap-2 rounded-[6px] border-accent-danger px-3 py-2 font-mono text-[10px] uppercase tracking-[0.08em] text-accent-danger"
               >
                 <RefreshCw size={12} />
-                [RETRY_EXECUTION]
+                Retry execution
               </button>
             ) : null}
           </div>

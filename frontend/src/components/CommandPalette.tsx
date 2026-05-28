@@ -36,15 +36,15 @@ export default function CommandPalette({ isOpen, onClose, onSelectCommand, recen
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 bg-black/50 z-40"
+            className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
           />
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: -20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: -20 }}
-            className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-full max-w-md z-50 bg-bg-surface border border-border-strong rounded-lg overflow-hidden"
+            className="surface-shell fixed left-1/2 top-1/2 z-50 w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-[8px]"
           >
-            <div className="p-4 border-b border-border-strong bg-bg-elevated">
+            <div className="border-b border-border-default bg-bg-elevated p-4">
               <div className="relative flex items-center">
                 <Search size={14} className="absolute left-3 text-text-muted" />
                 <input
@@ -53,7 +53,7 @@ export default function CommandPalette({ isOpen, onClose, onSelectCommand, recen
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search commands..."
-                  className="w-full bg-bg-base border border-border-strong pl-10 pr-4 py-2 text-[11px] font-mono text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-primary"
+                  className="field-input w-full py-2 pl-10 pr-4 font-mono text-[11px] text-text-primary placeholder:text-text-muted"
                 />
               </div>
             </div>
@@ -61,10 +61,10 @@ export default function CommandPalette({ isOpen, onClose, onSelectCommand, recen
             <div className="max-h-[400px] overflow-y-auto">
               {recentCommands.length > 0 && !search && (
                 <>
-                  <div className="px-4 py-2 text-[10px] font-mono uppercase tracking-widest text-text-muted border-b border-border-subtle">
+                  <div className="border-b border-border-subtle px-4 py-2">
                     <div className="flex items-center gap-2">
                       <History size={10} />
-                      Recent
+                      <span className="micro-label">Recent</span>
                     </div>
                   </div>
                   {recentCommands.slice(0, 3).map((cmd, idx) => (
@@ -74,7 +74,7 @@ export default function CommandPalette({ isOpen, onClose, onSelectCommand, recen
                         onSelectCommand(cmd);
                         onClose();
                       }}
-                      className="w-full text-left px-4 py-2 hover:bg-bg-elevated transition-colors text-[11px] font-mono text-text-secondary hover:text-text-primary border-b border-border-subtle"
+                      className="w-full border-b border-border-subtle px-4 py-2 text-left font-mono text-[11px] text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
                     >
                       {cmd}
                     </button>
@@ -82,10 +82,10 @@ export default function CommandPalette({ isOpen, onClose, onSelectCommand, recen
                 </>
               )}
 
-              <div className="px-4 py-2 text-[10px] font-mono uppercase tracking-widest text-text-muted border-b border-border-subtle">
+              <div className="border-b border-border-subtle px-4 py-2">
                 <div className="flex items-center gap-2">
                   <Command size={10} />
-                  Commands
+                  <span className="micro-label">Commands</span>
                 </div>
               </div>
               {filteredCommands.length > 0 ? (
@@ -96,9 +96,9 @@ export default function CommandPalette({ isOpen, onClose, onSelectCommand, recen
                       onSelectCommand(cmd.command);
                       onClose();
                     }}
-                    className="w-full text-left px-4 py-3 hover:bg-bg-elevated transition-colors border-b border-border-subtle group"
+                    className="group w-full border-b border-border-subtle px-4 py-3 text-left transition-colors hover:bg-bg-elevated"
                   >
-                    <div className="text-[11px] font-mono font-bold text-accent-primary group-hover:text-white transition-colors">
+                    <div className="font-mono text-[11px] font-bold text-accent-primary transition-colors group-hover:text-white">
                       {cmd.label}
                     </div>
                     <div className="text-[10px] font-mono text-text-muted group-hover:text-text-secondary mt-1">
@@ -107,7 +107,7 @@ export default function CommandPalette({ isOpen, onClose, onSelectCommand, recen
                   </button>
                 ))
               ) : (
-                <div className="px-4 py-6 text-center text-text-muted text-[11px] font-mono">
+                <div className="px-4 py-6 text-center font-mono text-[11px] text-text-muted">
                   No commands found
                 </div>
               )}
@@ -115,7 +115,7 @@ export default function CommandPalette({ isOpen, onClose, onSelectCommand, recen
 
             <button
               onClick={onClose}
-              className="absolute top-3 right-3 p-1 hover:bg-border-strong rounded transition-colors"
+              className="control-button absolute right-3 top-3 rounded-[6px] p-1"
             >
               <X size={14} className="text-text-muted hover:text-text-primary" />
             </button>

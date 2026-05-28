@@ -89,36 +89,36 @@ export default function LiveLogsPanel() {
   };
 
   return (
-    <div className="flex flex-1 flex-col min-h-0 bg-bg-surface overflow-hidden">
-      <div className="flex items-center justify-between p-4 border-b border-border-strong bg-bg-elevated shrink-0">
+    <div className="panel flex min-h-0 flex-1 flex-col overflow-hidden rounded-[12px]">
+      <div className="flex shrink-0 items-center justify-between border-b border-border-default bg-bg-elevated px-5 py-4">
         <div className="flex items-center gap-2">
-          <div className={`w-1.5 h-1.5 rounded-full ${status === 'live' ? 'bg-accent-success animate-pulse' : 'bg-text-muted'}`} />
-          <h3 className="text-[11px] uppercase tracking-[0.2em] text-text-primary font-bold font-display">System Operations</h3>
+          <div className={`h-1.5 w-1.5 rounded-full ${status === 'live' ? 'bg-accent-success animate-pulse' : 'bg-text-muted'}`} />
+          <h3 className="font-display text-[13px] font-semibold text-text-primary">Activity</h3>
         </div>
-        <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
-          status === 'live' ? 'text-accent-success border-accent-success/30' : 'text-text-muted border-border-strong'
+        <span className={`status-pill ${
+          status === 'live' ? 'text-accent-success' : 'text-text-muted'
         }`}>
           {statusLabel}
         </span>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 space-y-4 scrollbar-thin scrollbar-thumb-border-strong">
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-4">
         {logs.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center opacity-50 space-y-3">
-            <div className="w-8 h-8 border border-dashed border-border-strong rounded-full flex items-center justify-center">
-              <div className="w-1 h-1 bg-accent-primary rounded-full animate-ping" />
+          <div className="flex h-full flex-col items-center justify-center space-y-3 opacity-60">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full border border-dashed border-border-strong">
+              <div className="h-1 w-1 animate-ping rounded-full bg-accent-primary" />
             </div>
-            <p className="text-[11px] font-mono uppercase tracking-widest">Awaiting system events...</p>
+            <p className="micro-label">Awaiting events</p>
           </div>
         ) : (
           logs.slice().reverse().map((log, idx) => (
             <div 
               key={`${log.timestamp}-${idx}`} 
-              className={`rounded-none border p-3 transition-all hover:translate-x-1 ${getLevelColor(log.level)}`}
+              className={`rounded-[8px] border p-3 transition-transform hover:translate-x-0.5 ${getLevelColor(log.level)}`}
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="flex flex-col gap-1">
-                  <span className="text-[9px] font-mono opacity-60 uppercase tracking-wider">
+                  <span className="font-mono text-[9px] uppercase tracking-[0.08em] opacity-60">
                     [{new Date(log.timestamp).toLocaleTimeString()}] {log.event}
                   </span>
                   <p className="text-[12px] font-medium leading-relaxed">{log.message}</p>
@@ -126,7 +126,7 @@ export default function LiveLogsPanel() {
               </div>
               {log.meta && Object.keys(log.meta).length > 0 && (
                 <div className="mt-2 pt-2 border-t border-current/10 overflow-hidden">
-                  <pre className="text-[10px] font-mono opacity-70 whitespace-pre-wrap break-all bg-black/20 p-2">
+                  <pre className="whitespace-pre-wrap break-all rounded-[6px] bg-black/20 p-2 font-mono text-[10px] opacity-70">
                     {JSON.stringify(log.meta, null, 2)}
                   </pre>
                 </div>

@@ -90,7 +90,7 @@ export default function ConnectWalletButton({ network }: ConnectWalletButtonProp
 
   if (isConnecting) {
     return (
-      <button disabled className="flex items-center gap-2 px-3 py-1.5 bg-bg-base border border-border-strong text-[11px] font-mono text-text-muted cursor-not-allowed">
+      <button disabled className="control-button flex items-center gap-2 rounded-[8px] px-3 py-1.5 font-mono text-[11px]">
         <Loader2 size={12} className="animate-spin" />
         Connecting...
       </button>
@@ -101,13 +101,13 @@ export default function ConnectWalletButton({ network }: ConnectWalletButtonProp
     return (
       <div className="flex items-center gap-2">
         {error && (
-          <span className="text-[10px] text-accent-danger font-mono uppercase flex items-center gap-1">
+          <span className="hidden items-center gap-1 font-mono text-[10px] uppercase text-accent-danger sm:flex">
             <AlertCircle size={10} /> {error}
           </span>
         )}
         <button
           onClick={connect}
-          className="flex items-center gap-2 px-3 py-1.5 bg-black border border-accent-primary text-accent-primary hover:bg-accent-primary hover:text-black text-[11px] font-mono font-bold uppercase tracking-widest transition-colors shadow-none"
+          className="primary-action flex items-center gap-2 rounded-[8px] px-3 py-1.5 font-mono text-[11px] font-bold uppercase tracking-[0.08em]"
         >
           <Wallet size={12} />
           Connect Wallet
@@ -120,10 +120,10 @@ export default function ConnectWalletButton({ network }: ConnectWalletButtonProp
     <div className="relative" ref={dropdownRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className={`flex items-center gap-2 px-3 py-1.5 bg-black border ${isOpen ? 'border-text-primary text-text-primary' : 'border-border-strong text-text-secondary'} hover:border-text-primary hover:text-text-primary text-[11px] font-mono uppercase transition-colors`}
+        className={`control-button flex max-w-[210px] items-center gap-2.5 rounded-full px-4 py-2 font-mono text-[11px] uppercase sm:max-w-none ${isOpen ? 'border-text-primary text-text-primary' : ''}`}
       >
-        <span className="flex h-1.5 w-1.5 bg-accent-success shadow-[0_0_5px_rgba(212,255,0,0.8)]"></span>
-        {walletLabel}
+        <span className="flex h-1.5 w-1.5 shrink-0 rounded-full bg-accent-success shadow-[0_0_10px_rgba(212,255,0,0.45)]"></span>
+        <span className="truncate">{walletLabel}</span>
       </button>
 
       <AnimatePresence>
@@ -133,11 +133,11 @@ export default function ConnectWalletButton({ network }: ConnectWalletButtonProp
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -5 }}
             transition={{ duration: 0.15 }}
-            className="absolute right-0 top-full mt-1 w-64 bg-bg-elevated border border-border-strong shadow-2xl z-50 overflow-hidden"
+            className="panel absolute right-0 top-full z-50 mt-2 w-72 overflow-hidden rounded-[8px] shadow-2xl"
           >
-            <div className="p-3 border-b border-border-subtle bg-bg-base">
-              <span className="text-[10px] text-text-muted font-mono uppercase tracking-widest">Active Connection</span>
-              <div className="mt-2 text-[11px] font-mono text-text-primary">
+            <div className="border-b border-border-subtle bg-bg-base p-3">
+              <span className="micro-label">Active connection</span>
+              <div className="mt-2 font-mono text-[11px] text-text-primary">
                 {isBalanceLoading ? (
                   <span className="inline-flex items-center gap-1 text-text-muted">
                     <Loader2 size={11} className="animate-spin" />
@@ -147,14 +147,14 @@ export default function ConnectWalletButton({ network }: ConnectWalletButtonProp
                   <span className="text-accent-danger">{balanceError}</span>
                 ) : (
                   <span>
-                    AVAILABLE: <span className="text-accent-primary">{balance ?? 0} GEN</span>
+                    Available: <span className="text-accent-primary">{balance ?? 0} GEN</span>
                   </span>
                 )}
               </div>
             </div>
 
             {hasPlatformWallet && (
-              <div className="px-3 py-2 border-b border-border-subtle text-[10px] font-mono leading-relaxed text-accent-warning bg-accent-warning/10">
+              <div className="border-b border-border-subtle bg-accent-warning/10 px-3 py-2 font-mono text-[10px] leading-relaxed text-accent-warning">
                 This is a server-managed wallet. Do not deposit funds you cannot afford to lose. Private keys are stored encrypted on the server.
               </div>
             )}
@@ -162,7 +162,7 @@ export default function ConnectWalletButton({ network }: ConnectWalletButtonProp
             <div className="p-1 flex flex-col">
               <button
                 onClick={handleCopy}
-                className="w-full text-left px-3 py-2 text-[11px] font-mono text-text-primary hover:bg-bg-surface hover:text-accent-primary transition-colors flex items-center justify-between group"
+                className="group flex w-full items-center justify-between rounded-[6px] px-3 py-2 text-left font-mono text-[11px] text-text-primary transition-colors hover:bg-bg-surface hover:text-accent-primary"
               >
                 <span className="flex items-center gap-2">
                   {copied ? <Check size={12} className="text-accent-success" /> : <Copy size={12} className="text-text-muted group-hover:text-accent-primary" />}
@@ -175,7 +175,7 @@ export default function ConnectWalletButton({ network }: ConnectWalletButtonProp
                   disconnect();
                   setIsOpen(false);
                 }}
-                className="w-full text-left px-3 py-2 text-[11px] font-mono text-accent-danger hover:bg-accent-danger/10 transition-colors flex items-center gap-2"
+                className="flex w-full items-center gap-2 rounded-[6px] px-3 py-2 text-left font-mono text-[11px] text-accent-danger transition-colors hover:bg-accent-danger/10"
               >
                 <LogOut size={12} />
                 Disconnect
