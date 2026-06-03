@@ -2,7 +2,7 @@ import os
 from typing import Any
 from web3 import Web3
 
-SUPPORTED_ACTIONS = {"transfer", "check_balance", "deploy_contract", "create_contract", "unknown"}
+SUPPORTED_ACTIONS = {"transfer", "check_balance", "deploy_contract", "create_contract", "generate_contract", "contract_review", "unknown"}
 
 
 def normalize_intent(raw_intent: dict[str, Any]) -> dict[str, Any]:
@@ -73,6 +73,16 @@ def normalize_intent(raw_intent: dict[str, Any]) -> dict[str, Any]:
         if recipient:
             intent["recipient"] = str(recipient).strip()
 
+    elif action == "generate_contract":
+        intent["logic_description"] = str(raw_intent.get("logic_description", raw_intent.get("prompt", ""))).strip()
+        intent["advanced"] = bool(raw_intent.get("advanced", False))
+        contract_type = raw_intent.get("contract_type")
+        if contract_type:
+            intent["contract_type"] = str(contract_type).strip().lower()
+
+    elif action == "contract_review":
+        intent["status"] = "reserved"
+
     return intent
 
 
@@ -116,7 +126,10 @@ def validate_intent(intent: dict[str, Any]) -> tuple[bool, str]:
         if gas_limit is not None and gas_limit < 21000:
             return False, "Deployment gas limit is too low."
         
-        if intent.get("contract_type") in ["escrow", "conditional_payment"]:
+        # Template-generated or uploaded contracts already carry deployable code.
+        # In that case constructor parameters are collected by the deploy UI, so
+        # do not require natural-language payment fields like amount/recipient.
+        if not intent.get("code") and intent.get("contract_type") in ["escrow", "conditional_payment"]:
             if not intent.get("amount") or intent.get("amount") <= 0:
                 return False, f"Amount is required for {intent.get('contract_type')}."
             if not intent.get("recipient"):
@@ -126,5 +139,12 @@ def validate_intent(intent: dict[str, Any]) -> tuple[bool, str]:
             
             if intent.get("contract_type") == "conditional_payment" and not intent.get("condition"):
                 return False, "Condition is required for conditional payment."
+
+    if intent.get("action") == "generate_contract":
+        if not intent.get("logic_description"):
+            return False, "Contract generation request is missing. Describe the contract you want to generate."
+
+    if intent.get("action") == "contract_review":
+        return False, "Contract review is reserved for a future release."
 
     return True, ""

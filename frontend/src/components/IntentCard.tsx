@@ -1,12 +1,14 @@
 import React from 'react';
 import { Intent } from '../lib/api';
-import { TerminalSquare, Send, Wallet, FileCode } from 'lucide-react';
+import { TerminalSquare, Send, Wallet, FileCode, Sparkles, ClipboardCheck } from 'lucide-react';
 import RiskIndicator from './RiskIndicator';
 
 const ACTION_ICON = {
   transfer: Send,
   check_balance: Wallet,
   deploy_contract: FileCode,
+  generate_contract: Sparkles,
+  contract_review: ClipboardCheck,
   unknown: TerminalSquare,
 } as const;
 
@@ -21,6 +23,10 @@ export default function IntentCard({ intent }: { intent: Intent }) {
         return 'BALANCE_CHECK';
       case 'deploy_contract':
         return 'CONTRACT_CREATION';
+      case 'generate_contract':
+        return 'CONTRACT_GENERATION';
+      case 'contract_review':
+        return 'CONTRACT_REVIEW';
       default:
         return intent.action.toUpperCase();
     }

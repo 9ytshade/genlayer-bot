@@ -56,3 +56,65 @@ def test_chat_history_round_trip():
     assert save_response.status_code == 200
     assert load_response.status_code == 200
     assert load_response.json() == payload
+
+
+def test_generate_contract_command_returns_valid_generated_contract(monkeypatch):
+    monkeypatch.setattr(chat.contract_generation_service, "client", None)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/chat",
+            json={"message": "/generate-contract Create an escrow contract that releases funds when both parties approve.", "network": "studionet"},
+        )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["status"] == "awaiting_confirmation"
+    assert body["intent"]["action"] == "deploy_contract"
+    assert body["generatedContract"]["contractType"] == "escrow"
+    assert "class EscrowContract" in body["generatedContract"]["code"]
+
+
+def test_generated_conditional_payment_with_code_is_not_blocked_by_amount_rule():
+    code = """import genlayer as gl
+from genlayer.types import *
+
+class RainyDayPayment(gl.contract.Contract):
+    def __init__(self, payer: Address, recipient: Address):
+        self.payer = payer
+        self.recipient = recipient
+
+    @gl.public.view
+    def payment_status(self) -> str:
+        return "ready"
+"""
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/chat",
+            json={
+                "message": f"Deploy this contract:\n\n{code}",
+                "network": "studionet",
+            },
+        )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["status"] == "awaiting_confirmation"
+    assert body["intent"]["action"] == "deploy_contract"
+
+
+def test_create_contract_language_routes_to_generation(monkeypatch):
+    monkeypatch.setattr(chat.contract_generation_service, "client", None)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/chat",
+            json={"message": "create a contract that releases payment when I say hi", "network": "studionet"},
+        )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["status"] == "awaiting_confirmation"
+    assert body["generatedContract"]["code"]
+    assert body["intent"]["action"] == "deploy_contract"

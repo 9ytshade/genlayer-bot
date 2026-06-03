@@ -16,6 +16,7 @@ from ..models import ChatHistory, User
 from ..network_config import normalize_network
 from ..rate_limit import limiter
 from ..safety import normalize_intent, validate_intent
+from ..services.contract_generation_service import ContractGenerationService
 from ..simulator import simulate_intent
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -28,6 +29,8 @@ send tokens - Prepare a wallet-side GEN transfer. Example: Send 10 GEN to 0x...
 deploy contract - Start contract deployment. Upload a .py GenLayer Intelligent Contract file when prompted.
 new chat - Start a clean chat session from the left sidebar.
 switch network - Use the network selector to switch between Studionet and Bradbury."""
+
+contract_generation_service = ContractGenerationService()
 
 class ChatRequest(BaseModel):
     message: str
@@ -80,6 +83,11 @@ class ContractValidationRequest(BaseModel):
     file_name: str | None = None
 
 
+class GenerateContractRequest(BaseModel):
+    intent: dict
+    network: str | None = None
+
+
 class ContractValidationResponse(BaseModel):
     valid: bool
     message: str
@@ -117,12 +125,50 @@ def resolve_network_or_400(network: str | None) -> str:
 
 def is_deploy_contract_request(message: str) -> bool:
     normalized = " ".join(message.lower().strip().split())
-    return normalized.startswith(("deploy contract", "deploy a contract", "deploy an intelligent contract", "create contract", "create a contract"))
+    return normalized.startswith((
+        "deploy contract",
+        "deploy a contract",
+        "deploy an intelligent contract",
+        "upload contract",
+        "upload a contract",
+        "submit contract",
+        "submit a contract",
+    ))
 
 
 def is_help_request(message: str) -> bool:
     normalized = " ".join(message.lower().strip().split())
     return normalized in {"help", "/help", "?", "commands", "show commands", "what can you do"}
+
+
+def is_generate_contract_request(message: str) -> bool:
+    normalized = " ".join(message.lower().strip().split())
+    generation_verbs = ("create", "generate", "build", "write", "make", "draft")
+    explicit_generation = normalized.startswith((
+        "/generate-contract",
+        "generate contract",
+        "generate a contract",
+        "generate an intelligent contract",
+    ))
+    natural_generation = any(
+        normalized.startswith(f"{verb} ") and "contract" in normalized
+        for verb in generation_verbs
+    )
+    return explicit_generation or natural_generation
+
+
+def is_contract_review_request(message: str) -> bool:
+    normalized = " ".join(message.lower().strip().split())
+    return normalized.startswith("/contract-review")
+
+
+def parse_generate_contract_request(message: str) -> tuple[str, bool]:
+    stripped = message.strip()
+    advanced = stripped.lower().startswith("/generate-contract advanced")
+    for prefix in ("/generate-contract advanced", "/generate-contract"):
+        if stripped.lower().startswith(prefix):
+            return stripped[len(prefix):].strip(), advanced
+    return stripped, advanced
 
 
 @router.get("/history", response_model=ChatHistoryPayload)
@@ -181,6 +227,67 @@ async def handle_chat(request: Request, chat_request: ChatRequest):
             "content": HELP_MESSAGE,
             "intent": {"action": "help"},
             "status": "success",
+        }
+
+    if is_contract_review_request(chat_request.message):
+        await logs_store.append("INFO", "CONTRACT_REVIEW_PLACEHOLDER", "Contract review command requested.")
+        return {
+            "content": "Contract review is reserved for a future release. For now, you can generate a contract with /generate-contract or upload a .py file for deployment.",
+            "intent": {"action": "contract_review", "status": "reserved"},
+            "status": "awaiting_input",
+        }
+
+    if is_generate_contract_request(chat_request.message):
+        generation_prompt, advanced = parse_generate_contract_request(chat_request.message)
+        if not generation_prompt:
+            return {
+                "content": "Tell me what Intelligent Contract you want to generate. Example: /generate-contract Create an escrow contract that releases funds when both parties approve.",
+                "intent": {"action": "generate_contract", "advanced": advanced},
+                "status": "awaiting_input",
+            }
+        result = contract_generation_service.generate(generation_prompt, advanced=advanced)
+        if not result["ok"]:
+            await logs_store.append("ERROR", "CONTRACT_GENERATION_FAILED", "Contract generation failed validation.", {"errors": result.get("errors", [])})
+            return {
+                "content": "Unable to generate a valid GenLayer contract.",
+                "intent": {"action": "generate_contract", "logic_description": generation_prompt, "advanced": advanced},
+                "status": "error",
+                "validation": {
+                    "valid": False,
+                    "errors": result.get("errors", []),
+                    "warnings": result.get("warnings", []),
+                },
+            }
+        await logs_store.append("SUCCESS", "CONTRACT_GENERATED", "Generated contract from natural language.", {"contractType": result["contractType"], "contractName": result["contractName"]})
+        return {
+            "content": f"Generated {result['contractName']} from your request. Review the code below, then copy, download, or deploy it.",
+            "intent": {
+                "action": "deploy_contract",
+                "contract_name": result["contractName"],
+                "contract_type": result["contractType"],
+                "code": result["code"],
+                "source_file_name": result["fileName"],
+                "constructor_args": [],
+                "constructor_kwargs": {},
+                "constructor_args_text": "[]",
+                "constructor_kwargs_text": "{}",
+                "deploy_value_text": "0",
+                "gas_limit_text": "",
+                "consensus_max_rotations_text": "",
+                "deploy_value": 0,
+                "leader_only": False,
+                "logic_description": generation_prompt,
+            },
+            "status": "awaiting_confirmation",
+            "generatedContract": {
+                "contractName": result["contractName"],
+                "contractType": result["contractType"],
+                "explanation": result["explanation"],
+                "code": result["code"],
+                "fileName": result["fileName"],
+                "specification": result["specification"],
+                "validation": result["validation"],
+            },
         }
 
     intent = normalize_intent(parse_intent(chat_request.message))
@@ -399,6 +506,42 @@ async def validate_contract(request: ContractValidationRequest) -> ContractValid
         {"file_name": request.file_name, "errors": validation["errors"], "warnings": validation["warnings"]},
     )
     return ContractValidationResponse(**validation)
+
+
+@router.post("/generate-contract")
+@limiter.limit("5/minute")
+async def generate_contract_endpoint(
+    request: Request,
+    body: GenerateContractRequest,
+    current_user: User = Depends(get_current_user),
+):
+    intent = body.intent
+    request_text = str(
+        intent.get("logic_description")
+        or intent.get("condition")
+        or intent.get("contract_type")
+        or "Generate a GenLayer Intelligent Contract"
+    )
+    result = contract_generation_service.generate(request_text, advanced=bool(intent.get("advanced")))
+    if not result["ok"]:
+        return {
+            "code": "",
+            "contract_name": intent.get("contract_name") or "GeneratedContract",
+            "valid": False,
+            "errors": result.get("errors", []),
+            "warnings": result.get("warnings", []),
+            "message": result.get("message", "Unable to generate a valid GenLayer contract."),
+        }
+
+    validation = result["validation"]
+    return {
+        "code": result["code"],
+        "contract_name": result["contractName"],
+        "valid": validation["valid"],
+        "errors": validation["errors"],
+        "warnings": validation["warnings"],
+        "message": validation["message"],
+    }
 
 
 @router.get("/tx-params")

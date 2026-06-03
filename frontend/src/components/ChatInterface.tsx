@@ -6,7 +6,7 @@ import QuickActions from './QuickActions';
 import CommandPalette from './CommandPalette';
 import ConnectWalletButton from './ConnectWalletButton';
 import type { Intent } from '../lib/api';
-import { MessageData, sendMessage, confirmAction, buildTransferTx, buildDeployTx, validateContractFile, getChatHistory, saveChatHistory, getStoredAuthToken } from '../lib/api';
+import { MessageData, sendMessage, confirmAction, buildTransferTx, buildDeployTx, validateContractFile, getChatHistory, saveChatHistory, getStoredAuthToken, generateContract } from '../lib/api';
 import { SendHorizontal, Bot, Loader2, Command, FileUp, Plus, MessageSquare } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useWallet } from '@/context/WalletContext';
@@ -29,6 +29,7 @@ help - Show this command list.
 check balance - Check the connected wallet balance on the selected GenLayer network.
 send tokens - Prepare a wallet-side GEN transfer. Example: Send 10 GEN to 0x...
 deploy contract - Start contract deployment. I will ask you to upload a .py GenLayer Intelligent Contract file.
+generate contract - Describe a contract in plain English and the AI will write and deploy it for you.
 new chat - Start a clean chat session from the left sidebar.
 switch network - Use the network selector to switch between Studionet and Bradbury.`;
 const HELP_COMMANDS: NonNullable<MessageData['helpCommands']> = [
@@ -46,6 +47,11 @@ const HELP_COMMANDS: NonNullable<MessageData['helpCommands']> = [
     label: 'Deploy Contract',
     command: 'Deploy contract',
     description: 'Upload a .py contract file and review deployment parameters.',
+  },
+  {
+    label: 'Generate Contract',
+    command: 'Generate contract: ',
+    description: 'Describe a contract and the AI will write, validate, and deploy it for you.',
   },
   {
     label: 'New Chat',
@@ -192,12 +198,33 @@ function parseDeployIntent(intent: Intent) {
 
 function isDeployContractCommand(content: string) {
   const normalized = content.trim().toLowerCase();
-  return /^(deploy|upload|create)\s+(an?\s+)?(intelligent\s+)?contract\b/.test(normalized);
+  return /^(deploy|upload|submit)\s+(an?\s+)?(intelligent\s+)?contract\b/.test(normalized);
 }
 
 function isHelpCommand(content: string) {
   const normalized = content.trim().toLowerCase();
   return /^(help|\/help|\?|commands|show commands|what can you do)$/.test(normalized);
+}
+
+function isGenerateContractCommand(content: string) {
+  const normalized = content.trim().toLowerCase();
+  return (
+    normalized === '/generate-contract'
+    || normalized === '/generate-contract advanced'
+    || /^(create|generate|build|write|make|draft)\s+(an?\s+)?(intelligent\s+)?contract\b/.test(normalized)
+  );
+}
+
+function createGenerateContractPrompt(advanced = false): MessageData {
+  return {
+    id: (Date.now() + 1).toString(),
+    role: 'bot',
+    content: advanced
+      ? 'Describe the custom Intelligent Contract you want to generate. I will convert it into a structured specification, generate template-based Python, validate it, and return deploy-ready code.'
+      : 'Tell me what Intelligent Contract you want to generate. Example: /generate-contract Create an escrow contract that releases funds when both parties approve.',
+    intent: { action: 'generate_contract', advanced },
+    status: 'awaiting_input',
+  };
 }
 
 function createDeployUploadPrompt(): MessageData {
@@ -557,6 +584,91 @@ export default function ChatInterface() {
       return;
     }
 
+    if (isGenerateContractCommand(trimmedInput)) {
+      const onlyCommand = trimmedInput === '/generate-contract' || trimmedInput === '/generate-contract advanced';
+      if (onlyCommand) {
+        appendMessagesToCurrentChat(createGenerateContractPrompt(trimmedInput.toLowerCase().includes('advanced')));
+        return;
+      }
+
+      setIsLoading(true);
+      try {
+        const response = await sendMessage(trimmedInput, connectedWallet ?? undefined, selectedNetwork);
+        const parsedIntent = (response.intent ?? {}) as Partial<Intent>;
+        const generated = await generateContract(
+          {
+            contract_type: parsedIntent.contract_type as string | undefined,
+            logic_description: (parsedIntent.logic_description as string | undefined) || trimmedInput,
+            contract_name: parsedIntent.contract_name as string | undefined,
+            amount: parsedIntent.amount as number | undefined,
+            recipient: parsedIntent.recipient as string | undefined,
+            condition: parsedIntent.condition as string | undefined,
+            advanced: Boolean(parsedIntent.advanced),
+          },
+          connectedWallet
+        );
+        if (!generated.valid) {
+          appendMessagesToCurrentChat({
+            id: (Date.now() + 1).toString(),
+            role: 'bot',
+            content: `The AI generated invalid contract code: ${generated.errors.join(', ')}`,
+            status: 'error',
+          });
+          return;
+        }
+        const fileName = `${generated.contract_name}.py`;
+        const normalizedIntent = normalizeDeployIntentForUi(
+          {
+            action: 'deploy_contract',
+            code: generated.code,
+            contract_name: generated.contract_name,
+            source_file_name: fileName,
+            constructor_args_text: '[]',
+            constructor_kwargs_text: '{}',
+            deploy_value_text: '0',
+            gas_limit_text: '',
+            consensus_max_rotations_text: '',
+            leader_only: false,
+          },
+          fileName
+        );
+        appendMessagesToCurrentChat({
+          id: (Date.now() + 1).toString(),
+          role: 'bot',
+          content: [
+            `I generated a ${generated.contract_name} contract. Review the parameters below and confirm to deploy.`,
+            generated.warnings.length ? `Warnings:\n${generated.warnings.join('\n')}` : '',
+          ].filter(Boolean).join('\n\n'),
+          intent: normalizedIntent,
+          generatedContract: {
+            contractName: generated.contract_name,
+            contractType: (parsedIntent.contract_type as string | undefined) || 'custom',
+            explanation: generated.message,
+            code: generated.code,
+            fileName,
+            validation: {
+              valid: generated.valid,
+              message: generated.message,
+              errors: generated.errors,
+              warnings: generated.warnings,
+              contract_names: [generated.contract_name],
+            },
+          },
+          status: 'awaiting_confirmation',
+        });
+      } catch (err) {
+        appendMessagesToCurrentChat({
+          id: (Date.now() + 1).toString(),
+          role: 'bot',
+          content: err instanceof Error ? err.message : 'Failed to generate contract.',
+          status: 'error',
+        });
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
+
     if (isDeployContractCommand(trimmedInput)) {
       appendMessagesToCurrentChat(createDeployUploadPrompt());
       setUploadError(null);
@@ -572,6 +684,7 @@ export default function ChatInterface() {
         role: 'bot',
         content: response.content || 'An error occurred.',
         intent: response.intent,
+        generatedContract: response.generatedContract,
         simulation: response.simulation,
         status: response.status
       };
@@ -729,6 +842,22 @@ export default function ChatInterface() {
       setRecentCommands(prev => [command, ...prev.filter((item) => item !== command)].slice(0, 5));
       setUploadError(null);
       return;
+    }
+
+    if (isGenerateContractCommand(command)) {
+      const onlyCommand = command.trim().toLowerCase() === '/generate-contract' || command.trim().toLowerCase() === '/generate-contract advanced';
+      if (onlyCommand) {
+        appendMessagesToCurrentChat(
+          {
+            id: Date.now().toString(),
+            role: 'user',
+            content: command,
+          },
+          createGenerateContractPrompt(command.toLowerCase().includes('advanced'))
+        );
+        setRecentCommands(prev => [command, ...prev.filter((item) => item !== command)].slice(0, 5));
+        return;
+      }
     }
 
     setInput(command);

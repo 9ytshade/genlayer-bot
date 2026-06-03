@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Send, Wallet, FileCode } from 'lucide-react';
+import { Send, Wallet, FileCode, Sparkles } from 'lucide-react';
 
 interface QuickActionsProps {
   onSelectAction: (action: string) => void;
@@ -11,6 +11,7 @@ export default function QuickActions({ onSelectAction }: QuickActionsProps) {
   const actions = [
     { label: 'Check Balance', command: 'What is my balance?', icon: Wallet },
     { label: 'Send Tokens', command: 'Send 10 GEN to', icon: Send },
+    { label: 'Generate Contract', command: '/generate-contract ', icon: Sparkles },
     { label: 'Deploy Contract', command: 'Deploy contract', icon: FileCode },
   ];
 

@@ -1,0 +1,394 @@
+# FEATURE IMPLEMENTATION REQUEST: GENLAYER INTELLIGENT CONTRACT GENERATOR
+
+## CONTEXT
+
+We already have a working GenLayer AI chatbot with the following implemented commands:
+
+1. Send Tokens
+2. Check Balance
+3. Deploy Existing Contracts
+
+The system already includes:
+
+* Chat interface
+* Intent parsing
+* Command routing
+* GenLayer integration
+* Wallet connection
+* Contract deployment functionality
+
+Your task is to ADD a new feature called:
+
+**Intelligent Contract Generator**
+
+---
+
+# OBJECTIVE
+
+Allow users to generate GenLayer-compatible Intelligent Contracts from natural language.
+
+Example user inputs:
+
+```text
+/generate-contract
+
+Create an escrow contract that releases funds when both parties approve.
+```
+
+```text
+Generate a conditional payment contract that sends 100 GEN when ETH exceeds $5000.
+```
+
+```text
+Generate a DAO voting contract with proposal creation and voting.
+```
+
+The chatbot should generate a valid `.py` Intelligent Contract that follows GenLayer standards and can be deployed on StudioNet.
+
+---
+
+# NEW COMMANDS
+
+## Command 1
+
+```text
+/generate-contract
+```
+
+Triggers contract generation workflow.
+
+---
+
+## Command 2
+
+```text
+/generate-contract advanced
+```
+
+Allows completely custom contract requests.
+
+---
+
+## Command 3
+
+```text
+/contract-review
+```
+
+Reserved for future implementation.
+
+Do not implement yet.
+
+Create routing placeholder only.
+
+---
+
+# ARCHITECTURE REQUIREMENTS
+
+Create a new service:
+
+```text
+ContractGenerationService
+```
+
+Responsibilities:
+
+1. Parse contract request
+2. Generate contract specification
+3. Generate contract code
+4. Validate generated contract
+5. Return exportable Python file
+
+---
+
+# GENERATION PIPELINE
+
+User Request
+↓
+Intent Parser
+↓
+Contract Specification
+↓
+Contract Generator
+↓
+Contract Validator
+↓
+Contract Explanation
+↓
+UI Response
+
+---
+
+# STEP 1: CONTRACT SPECIFICATION LAYER
+
+DO NOT generate Python directly from the user prompt.
+
+Convert user intent into a structured contract specification.
+
+Example:
+
+Input:
+
+```text
+Create an escrow contract.
+```
+
+Output:
+
+```json
+{
+  "contractType": "escrow",
+  "participants": 2,
+  "releaseCondition": "mutual_approval"
+}
+```
+
+This specification becomes the source of truth.
+
+---
+
+# STEP 2: CONTRACT GENERATOR
+
+Implement a generator module:
+
+```text
+ContractGenerator
+```
+
+It should create Python code from the specification.
+
+The generator should support:
+
+1. Escrow
+2. Conditional Payment
+3. Subscription
+4. DAO Voting
+5. Treasury
+6. Bounty
+7. AI Arbitration
+
+Structure code so more templates can be added later.
+
+---
+
+# STEP 3: LLM INTEGRATION
+
+Use existing LLM provider.
+
+The LLM should:
+
+* Generate contract specifications
+* Generate contract explanations
+
+The LLM SHOULD NOT directly generate deployable code without validation.
+
+Contract code generation should be template-driven whenever possible.
+
+---
+
+# STEP 4: CONTRACT VALIDATOR
+
+Create:
+
+```text
+ContractValidator
+```
+
+Validation rules:
+
+## Syntax Validation
+
+Verify generated code is valid Python.
+
+Example:
+
+```python
+ast.parse(contract_code)
+```
+
+Reject invalid code.
+
+---
+
+## Security Validation
+
+Reject:
+
+```python
+import os
+import subprocess
+import socket
+import requests
+```
+
+Reject dangerous patterns.
+
+---
+
+## Compliance Validation
+
+Verify:
+
+* Valid GenLayer contract structure
+* Required contract class exists
+* Required methods exist
+* No unsupported imports
+
+---
+
+# STEP 5: CONTRACT EXPLANATION
+
+Generate human-readable explanation.
+
+Example:
+
+"This contract acts as an escrow. Funds are locked until both parties approve release."
+
+Return explanation alongside generated code.
+
+---
+
+# STEP 6: UI REQUIREMENTS
+
+After generation, display:
+
+1. Contract Name
+2. Contract Type
+3. Explanation
+4. Generated Python Code
+
+Add action buttons:
+
+```text
+[ Copy Code ]
+[ Download .py ]
+[ Deploy ]
+```
+
+---
+
+# DOWNLOAD FEATURE
+
+Implement export functionality.
+
+Generate:
+
+```text
+ContractName.py
+```
+
+User must be able to download the generated contract.
+
+The downloaded file should contain only valid Python contract code.
+
+---
+
+# DEPLOY BUTTON
+
+The existing deployment infrastructure already exists.
+
+The Deploy button should:
+
+1. Use generated code
+2. Pass validation
+3. Forward to existing deploy workflow
+
+No duplicate deployment logic.
+
+Reuse existing deployment services.
+
+---
+
+# ERROR HANDLING
+
+If generation fails:
+
+Return:
+
+```text
+Unable to generate a valid GenLayer contract.
+```
+
+Show validation errors.
+
+Never deploy invalid contracts.
+
+---
+
+# CODE ORGANIZATION
+
+Create:
+
+```text
+services/
+  ContractGenerationService.ts
+
+generators/
+  EscrowTemplate.ts
+  ConditionalPaymentTemplate.ts
+  DaoVotingTemplate.ts
+  SubscriptionTemplate.ts
+  TreasuryTemplate.ts
+  BountyTemplate.ts
+  AIArbitrationTemplate.ts
+
+validators/
+  ContractValidator.ts
+
+types/
+  ContractSpec.ts
+```
+
+Adjust names to match existing codebase conventions.
+
+---
+
+# ACCEPTANCE CRITERIA
+
+A user can type:
+
+```text
+Generate an escrow contract.
+```
+
+The system must:
+
+✓ Parse request
+
+✓ Build specification
+
+✓ Generate valid contract
+
+✓ Validate contract
+
+✓ Display contract
+
+✓ Display explanation
+
+✓ Provide Download button
+
+✓ Provide Copy button
+
+✓ Provide Deploy button
+
+✓ Reuse existing deployment flow
+
+✓ Prevent invalid code deployment
+
+---
+
+# FUTURE COMPATIBILITY
+
+Design this module so future features can be added:
+
+* Contract review
+* Contract optimization
+* Contract security scoring
+* One-click StudioNet deployment
+* AI-assisted contract editing
+
+Do not implement these features yet.
+
+Only ensure the architecture supports them.
+
+END OF TASK.

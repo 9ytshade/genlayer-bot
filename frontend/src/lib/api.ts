@@ -1,5 +1,5 @@
 export interface Intent {
-  action: 'transfer' | 'check_balance' | 'deploy_contract' | 'unknown';
+  action: 'transfer' | 'check_balance' | 'deploy_contract' | 'generate_contract' | 'contract_review' | 'unknown';
   amount?: number;
   token?: string;
   recipient?: string;
@@ -48,6 +48,15 @@ export interface MessageData {
     command: string;
     description: string;
   }>;
+  generatedContract?: {
+    contractName: string;
+    contractType: string;
+    explanation: string;
+    code: string;
+    fileName: string;
+    specification?: Record<string, unknown>;
+    validation?: ContractValidationResult;
+  };
 }
 
 export interface ChatHistoryPayload {
@@ -456,4 +465,52 @@ export async function buildDeployTx(
     maxFeePerGas: tx.max_fee_per_gas ? BigInt(tx.max_fee_per_gas) : undefined,
     maxPriorityFeePerGas: tx.max_priority_fee_per_gas ? BigInt(tx.max_priority_fee_per_gas) : undefined,
   };
+}
+
+export interface GenerateContractResult {
+  code: string;
+  contract_name: string;
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+  message: string;
+}
+
+export async function generateContract(
+  intent: {
+    contract_type?: string;
+    logic_description?: string;
+    contract_name?: string;
+    amount?: number;
+    recipient?: string;
+    condition?: string;
+    advanced?: boolean;
+  },
+  walletAddress: string
+): Promise<GenerateContractResult> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
+  try {
+    const response = await fetch(`${API_URL}/chat/generate-contract`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders(walletAddress),
+      },
+      body: JSON.stringify({ intent }),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.detail || `Failed to generate contract: ${response.status}`);
+    }
+    return response.json();
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error('Contract generation timed out. Please try again.');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }

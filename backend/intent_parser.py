@@ -15,12 +15,14 @@ def parse_intent(user_input: str) -> dict:
     system_prompt = """
     You are an AI intent parser for GenLayer blockchain.
     Convert user input into a strict JSON intent.
-    Supported actions: 'transfer', 'check_balance', 'deploy_contract', 'unknown'.
+    Supported actions: 'transfer', 'check_balance', 'deploy_contract', 'generate_contract', 'contract_review', 'unknown'.
     
     Rules:
     - If action is 'transfer', extract 'amount' (number), 'token' (string, default 'GEN'), and 'recipient' (string).
     - If action is 'check_balance', no extra fields needed.
     - If action is 'deploy_contract', extract 'contract_name' (string) and 'code' (string if provided).
+    - If action is 'generate_contract', extract 'logic_description' and whether it is advanced.
+    - If action is 'contract_review', return it only for /contract-review requests.
     - If action is 'unknown', return {"action": "unknown"}.
     """
     
@@ -35,13 +37,15 @@ def parse_intent(user_input: str) -> dict:
                     "properties": {
                         "action": {
                             "type": "string",
-                            "enum": ["transfer", "check_balance", "deploy_contract", "unknown"]
+                            "enum": ["transfer", "check_balance", "deploy_contract", "generate_contract", "contract_review", "unknown"]
                         },
                         "amount": {"type": "number"},
                         "token": {"type": "string"},
                         "recipient": {"type": "string"},
                         "contract_name": {"type": "string"},
-                        "code": {"type": "string"}
+                        "code": {"type": "string"},
+                        "logic_description": {"type": "string"},
+                        "advanced": {"type": "boolean"}
                     },
                     "required": ["action"]
                 }

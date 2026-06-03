@@ -1,0 +1,1 @@
+"""Typed contract-generation structures."""

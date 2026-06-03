@@ -4,7 +4,7 @@ import IntentCard from './IntentCard';
 import SimulationCard from './SimulationCard';
 import ConfirmationButtons from './ConfirmationButtons';
 import DeployContractPanel from './DeployContractPanel';
-import { Bot, UserRound, Check, Loader2, Copy, AlertCircle, RefreshCw } from 'lucide-react';
+import { Bot, UserRound, Check, Loader2, Copy, AlertCircle, RefreshCw, Download, Rocket } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 interface MessageProps {
@@ -19,6 +19,7 @@ export default function Message({ msg, onConfirm, onCancel, onUpdateIntent, onRu
   const isUser = msg.role === 'user';
   const [copied, setCopied] = useState(false);
   const [copiedAddress, setCopiedAddress] = useState<string | null>(null);
+  const [copiedCode, setCopiedCode] = useState(false);
   const isRealTxHash = Boolean(msg.txHash && /^0x[a-fA-F0-9]{64}$/.test(msg.txHash));
   const txExplorerBase = process.env.NEXT_PUBLIC_EXPLORER_TX_URL;
   const txExplorerUrl = isRealTxHash && txExplorerBase ? `${txExplorerBase}${msg.txHash}` : null;
@@ -33,6 +34,24 @@ export default function Message({ msg, onConfirm, onCancel, onUpdateIntent, onRu
     navigator.clipboard.writeText(address);
     setCopiedAddress(address);
     setTimeout(() => setCopiedAddress(null), 2000);
+  };
+
+  const handleCopyCode = (code: string) => {
+    navigator.clipboard.writeText(code);
+    setCopiedCode(true);
+    setTimeout(() => setCopiedCode(false), 2000);
+  };
+
+  const handleDownloadContract = (fileName: string, code: string) => {
+    const blob = new Blob([code], { type: 'text/x-python;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
   };
 
   const formatTime = (id: string) => {
@@ -80,6 +99,57 @@ export default function Message({ msg, onConfirm, onCancel, onUpdateIntent, onRu
                 </div>
               </button>
             ))}
+          </div>
+        )}
+
+        {!isUser && msg.generatedContract && (
+          <div className="data-card mt-3 w-full overflow-hidden">
+            <div className="border-b border-border-default p-4 sm:p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="micro-label mb-2">Generated contract</div>
+                  <h3 className="font-display text-lg font-semibold text-text-primary">
+                    {msg.generatedContract.contractName}
+                  </h3>
+                  <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.08em] text-accent-primary">
+                    {msg.generatedContract.contractType.replace(/_/g, ' ')}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleCopyCode(msg.generatedContract!.code)}
+                    className="control-button flex items-center gap-2 rounded-full px-3 py-2 font-mono text-[10px] uppercase tracking-[0.08em]"
+                  >
+                    <Copy size={13} />
+                    {copiedCode ? 'Copied' : 'Copy code'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadContract(msg.generatedContract!.fileName, msg.generatedContract!.code)}
+                    className="control-button flex items-center gap-2 rounded-full px-3 py-2 font-mono text-[10px] uppercase tracking-[0.08em]"
+                  >
+                    <Download size={13} />
+                    Download .py
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onConfirm(msg.id)}
+                    disabled={msg.status === 'executing' || msg.status === 'success'}
+                    className="primary-action flex items-center gap-2 rounded-full px-3 py-2 font-mono text-[10px] uppercase tracking-[0.08em] disabled:opacity-50"
+                  >
+                    <Rocket size={13} />
+                    Deploy
+                  </button>
+                </div>
+              </div>
+              <p className="mt-4 text-sm leading-relaxed text-text-secondary">
+                {msg.generatedContract.explanation}
+              </p>
+            </div>
+            <pre className="max-h-96 overflow-auto p-4 font-mono text-[11px] leading-relaxed text-text-secondary sm:p-5">
+              {msg.generatedContract.code}
+            </pre>
           </div>
         )}
 
