@@ -4,7 +4,7 @@ import IntentCard from './IntentCard';
 import SimulationCard from './SimulationCard';
 import ConfirmationButtons from './ConfirmationButtons';
 import DeployContractPanel from './DeployContractPanel';
-import { Bot, UserRound, Check, Loader2, Copy, AlertCircle, RefreshCw, Download, Rocket } from 'lucide-react';
+import { Bot, UserRound, Check, Loader2, Copy, AlertCircle, RefreshCw, Download, Rocket, ExternalLink } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 interface MessageProps {
@@ -21,8 +21,9 @@ export default function Message({ msg, onConfirm, onCancel, onUpdateIntent, onRu
   const [copiedAddress, setCopiedAddress] = useState<string | null>(null);
   const [copiedCode, setCopiedCode] = useState(false);
   const isRealTxHash = Boolean(msg.txHash && /^0x[a-fA-F0-9]{64}$/.test(msg.txHash));
-  const txExplorerBase = process.env.NEXT_PUBLIC_EXPLORER_TX_URL;
-  const txExplorerUrl = isRealTxHash && txExplorerBase ? `${txExplorerBase}${msg.txHash}` : null;
+  const configuredTxExplorerBase = process.env.NEXT_PUBLIC_EXPLORER_TX_URL;
+  const txExplorerBase = configuredTxExplorerBase || 'https://explorer-studio.genlayer.com/tx/';
+  const txExplorerUrl = isRealTxHash ? `${txExplorerBase}${msg.txHash}` : null;
 
   const handleCopyHash = (hash: string) => {
     navigator.clipboard.writeText(hash);
@@ -64,13 +65,13 @@ export default function Message({ msg, onConfirm, onCancel, onUpdateIntent, onRu
       initial={{ opacity: 0, y: 15, scale: 0.98 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-      className={`flex w-full max-w-3xl gap-4 px-1 sm:gap-5 sm:px-2 ${isUser ? 'ml-auto flex-row-reverse' : ''}`}
+      className={`flex w-full gap-3 px-1 sm:gap-4 ${isUser ? 'ml-auto flex-row-reverse' : ''}`}
     >
-      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border ${isUser ? 'border-accent-primary bg-accent-primary text-black' : 'border-border-strong bg-bg-elevated text-accent-cyan'}`}>
-        {isUser ? <UserRound size={17} /> : <Bot size={17} />}
+      <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] border ${isUser ? 'border-accent-primary bg-accent-primary text-black' : 'border-border-strong bg-bg-elevated text-accent-cyan'}`}>
+        {isUser ? <UserRound size={14} /> : <Bot size={14} />}
       </div>
       
-      <div className={`flex max-w-[88%] flex-col gap-2 sm:max-w-[85%] ${isUser ? 'items-end' : 'items-start'}`}>
+      <div className={`flex max-w-[88%] flex-col gap-2 sm:max-w-[86%] ${isUser ? 'items-end' : 'items-start'}`}>
         <div className="flex items-center gap-2 px-1">
           <span className="micro-label">
             {isUser ? 'You' : 'Agent'}
@@ -78,8 +79,8 @@ export default function Message({ msg, onConfirm, onCancel, onUpdateIntent, onRu
           <span className="font-mono text-[9px] text-text-muted opacity-60">{formatTime(msg.id)}</span>
         </div>
         
-        <div className={`px-6 py-[1.125rem] sm:px-7 sm:py-5 ${isUser ? 'message-card-user' : 'message-card text-text-primary'}`}>
-          <p className="whitespace-pre-wrap break-words text-[14px] leading-relaxed">{msg.content}</p>
+        <div className={`rounded-[10px] px-4 py-3 sm:px-5 ${isUser ? 'message-card-user' : 'message-card text-text-primary'}`}>
+          <p className="whitespace-pre-wrap break-words text-[12px] font-medium leading-relaxed sm:text-[13px]">{msg.content}</p>
         </div>
 
         {!isUser && msg.helpCommands && msg.helpCommands.length > 0 && (
@@ -103,53 +104,61 @@ export default function Message({ msg, onConfirm, onCancel, onUpdateIntent, onRu
         )}
 
         {!isUser && msg.generatedContract && (
-          <div className="data-card mt-3 w-full overflow-hidden">
-            <div className="border-b border-border-default p-4 sm:p-5">
+          <div className="data-card mt-3 w-full overflow-hidden rounded-[12px]">
+            <div className="border-b border-border-default p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <div className="micro-label mb-2">Generated contract</div>
-                  <h3 className="font-display text-lg font-semibold text-text-primary">
+                  <div className="micro-label mb-1">Generated Contract</div>
+                  <h3 className="font-display text-[18px] font-semibold leading-tight text-text-primary">
                     {msg.generatedContract.contractName}
                   </h3>
-                  <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.08em] text-accent-primary">
+                  <p className="mt-1 font-mono text-[10px] text-accent-primary">
                     {msg.generatedContract.contractType.replace(/_/g, ' ')}
                   </p>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleCopyCode(msg.generatedContract!.code)}
-                    className="control-button flex items-center gap-2 rounded-full px-3 py-2 font-mono text-[10px] uppercase tracking-[0.08em]"
-                  >
-                    <Copy size={13} />
-                    {copiedCode ? 'Copied' : 'Copy code'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleDownloadContract(msg.generatedContract!.fileName, msg.generatedContract!.code)}
-                    className="control-button flex items-center gap-2 rounded-full px-3 py-2 font-mono text-[10px] uppercase tracking-[0.08em]"
-                  >
-                    <Download size={13} />
-                    Download .py
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onConfirm(msg.id)}
-                    disabled={msg.status === 'executing' || msg.status === 'success'}
-                    className="primary-action flex items-center gap-2 rounded-full px-3 py-2 font-mono text-[10px] uppercase tracking-[0.08em] disabled:opacity-50"
-                  >
-                    <Rocket size={13} />
-                    Deploy
-                  </button>
-                </div>
+                <span className="status-pill border-accent-success/45 bg-accent-success/5 text-accent-success">
+                  IntelligentContract
+                </span>
               </div>
-              <p className="mt-4 text-sm leading-relaxed text-text-secondary">
+              <div className="mt-3 flex flex-wrap gap-2">
+                <span className="status-pill border-accent-primary/45 bg-accent-primary/5 text-accent-primary">awaiting confirmation</span>
+                <span className="status-pill border-accent-success/45 bg-accent-success/5 text-accent-success">syntax valid</span>
+                <span className="status-pill border-accent-warning/45 bg-accent-warning/5 text-accent-warning">review constructor args</span>
+              </div>
+              <p className="mt-4 text-[12px] leading-relaxed text-text-secondary">
                 {msg.generatedContract.explanation}
               </p>
             </div>
-            <pre className="max-h-96 overflow-auto p-4 font-mono text-[11px] leading-relaxed text-text-secondary sm:p-5">
+            <pre className="mx-4 mt-4 max-h-80 overflow-auto rounded-[8px] border border-border-subtle bg-bg-base p-4 font-mono text-[10px] leading-relaxed text-text-secondary sm:text-[11px]">
               {msg.generatedContract.code}
             </pre>
+            <div className="flex flex-wrap gap-2 p-4">
+              <button
+                type="button"
+                onClick={() => handleCopyCode(msg.generatedContract!.code)}
+                className="control-button flex items-center gap-2 rounded-[8px] px-3 py-2 font-mono text-[10px] font-bold"
+              >
+                <Copy size={12} />
+                {copiedCode ? 'Copied' : 'Copy code'}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDownloadContract(msg.generatedContract!.fileName, msg.generatedContract!.code)}
+                className="control-button flex items-center gap-2 rounded-[8px] px-3 py-2 font-mono text-[10px] font-bold"
+              >
+                <Download size={12} />
+                Download .py
+              </button>
+              <button
+                type="button"
+                onClick={() => onConfirm(msg.id)}
+                disabled={msg.status === 'executing' || msg.status === 'success'}
+                className="primary-action flex items-center gap-2 rounded-[8px] px-3 py-2 font-mono text-[10px] font-bold disabled:opacity-50"
+              >
+                <Rocket size={12} />
+                Deploy
+              </button>
+            </div>
           </div>
         )}
 
@@ -170,6 +179,11 @@ export default function Message({ msg, onConfirm, onCancel, onUpdateIntent, onRu
             <DeployContractPanel
               intent={msg.intent}
               disabled={msg.status === 'executing' || msg.status === 'success'}
+              txHash={msg.txHash}
+              consensusTxId={msg.consensusTxId}
+              contractAddress={msg.contractAddress}
+              derivedAddresses={msg.derivedAddresses}
+              status={msg.status}
               onChange={(patch) => onUpdateIntent(msg.id, patch)}
             />
           </div>
@@ -200,14 +214,28 @@ export default function Message({ msg, onConfirm, onCancel, onUpdateIntent, onRu
               Transaction success
             </div>
             <div className="flex items-center justify-between gap-2 break-all pl-6 opacity-85">
-              <span>{isRealTxHash ? `HASH: ${msg.txHash}` : msg.txHash}</span>
-              <button
-                onClick={() => handleCopyHash(msg.txHash!)}
-                className="control-button ml-2 rounded-[6px] p-1"
-                title="Copy transaction hash"
-              >
-                <Copy size={12} className={copied ? 'text-accent-primary' : ''} />
-              </button>
+              <span className="min-w-0 break-all">{isRealTxHash ? `HASH: ${msg.txHash}` : msg.txHash}</span>
+              <div className="flex shrink-0 items-center gap-1">
+                <button
+                  onClick={() => handleCopyHash(msg.txHash!)}
+                  className="control-button rounded-[6px] p-1"
+                  title="Copy transaction hash"
+                >
+                  <Copy size={12} className={copied ? 'text-accent-primary' : ''} />
+                </button>
+                {txExplorerUrl && (
+                  <a
+                    href={txExplorerUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="control-button flex items-center gap-1 rounded-[6px] px-2 py-1 text-[10px] text-accent-success"
+                    title="View transaction in GenLayer explorer"
+                  >
+                    <ExternalLink size={11} />
+                    Check in explorer
+                  </a>
+                )}
+              </div>
             </div>
             {msg.consensusTxId && (
               <div className="opacity-80 pl-6 break-all">
@@ -250,16 +278,6 @@ export default function Message({ msg, onConfirm, onCancel, onUpdateIntent, onRu
                   ))}
                 </div>
               </div>
-            )}
-            {txExplorerUrl && (
-              <a
-                href={txExplorerUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="pl-6 text-[10px] uppercase tracking-[0.08em] text-accent-success transition-colors hover:text-white"
-              >
-                View on explorer
-              </a>
             )}
           </div>
         )}

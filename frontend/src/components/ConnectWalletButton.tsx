@@ -41,9 +41,7 @@ export default function ConnectWalletButton({ network }: ConnectWalletButtonProp
     }
   };
 
-  const walletLabel = account
-    ? `${formatAddress(account)}${balance !== null ? ` - ${balance.toFixed(4)} GEN` : isBalanceLoading ? ' - loading' : ' - --'}`
-    : 'Connect Wallet';
+  const balanceLabel = balance !== null ? `${balance.toFixed(4)} GEN` : isBalanceLoading ? 'loading' : '-- GEN';
 
   useEffect(() => {
     const fetchBalance = async () => {
@@ -120,10 +118,21 @@ export default function ConnectWalletButton({ network }: ConnectWalletButtonProp
     <div className="relative" ref={dropdownRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className={`control-button flex max-w-[210px] items-center gap-2.5 rounded-full px-4 py-2 font-mono text-[11px] uppercase sm:max-w-none ${isOpen ? 'border-text-primary text-text-primary' : ''}`}
+        className={`control-button flex max-w-[190px] items-start gap-2 rounded-full px-3 py-2 font-mono sm:max-w-[220px] ${isOpen ? 'border-text-primary text-text-primary' : ''}`}
       >
-        <span className="flex h-1.5 w-1.5 shrink-0 rounded-full bg-accent-success shadow-[0_0_10px_rgba(212,255,0,0.45)]"></span>
-        <span className="truncate">{walletLabel}</span>
+        <span className="mt-1 flex h-1.5 w-1.5 shrink-0 rounded-full bg-accent-success shadow-[0_0_10px_rgba(212,255,0,0.45)]"></span>
+        {account ? (
+          <span className="flex min-w-0 flex-col items-start gap-0.5 leading-none">
+            <span className="max-w-full truncate text-[9px] font-semibold uppercase tracking-[0.04em] sm:text-[10px]">
+              {formatAddress(account)}
+            </span>
+            <span className="max-w-full truncate text-[9px] text-text-secondary sm:text-[10px]">
+              {balanceLabel}
+            </span>
+          </span>
+        ) : (
+          <span className="text-[10px] uppercase">Connect Wallet</span>
+        )}
       </button>
 
       <AnimatePresence>

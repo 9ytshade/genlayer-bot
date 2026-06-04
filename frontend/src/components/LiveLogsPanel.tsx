@@ -20,7 +20,7 @@ function getWsUrl(): string {
   return `${wsBase}/logs/stream`;
 }
 
-export default function LiveLogsPanel() {
+export default function LiveLogsPanel({ compact = false }: { compact?: boolean }) {
   const [logs, setLogs] = useState<LogItem[]>([]);
   const [status, setStatus] = useState<'connecting' | 'live' | 'offline'>('connecting');
 
@@ -90,10 +90,13 @@ export default function LiveLogsPanel() {
 
   return (
     <div className="panel flex min-h-0 flex-1 flex-col overflow-hidden rounded-[12px]">
-      <div className="flex shrink-0 items-center justify-between border-b border-border-default bg-bg-elevated px-5 py-4">
+      <div className="flex shrink-0 items-center justify-between border-b border-border-default bg-bg-elevated px-4 py-3">
         <div className="flex items-center gap-2">
           <div className={`h-1.5 w-1.5 rounded-full ${status === 'live' ? 'bg-accent-success animate-pulse' : 'bg-text-muted'}`} />
-          <h3 className="font-display text-[13px] font-semibold text-text-primary">Activity</h3>
+          <div>
+            <h3 className="font-display text-[13px] font-semibold text-text-primary">Activity Monitor</h3>
+            <div className="micro-label mt-1">Live validation and deploy logs</div>
+          </div>
         </div>
         <span className={`status-pill ${
           status === 'live' ? 'text-accent-success' : 'text-text-muted'
@@ -102,7 +105,7 @@ export default function LiveLogsPanel() {
         </span>
       </div>
 
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-4">
+      <div className={`min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-3 py-3 ${compact ? 'pb-14 lg:pb-3' : ''}`}>
         {logs.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center space-y-3 opacity-60">
             <div className="flex h-8 w-8 items-center justify-center rounded-full border border-dashed border-border-strong">
@@ -121,7 +124,7 @@ export default function LiveLogsPanel() {
                   <span className="font-mono text-[9px] uppercase tracking-[0.08em] opacity-60">
                     [{new Date(log.timestamp).toLocaleTimeString()}] {log.event}
                   </span>
-                  <p className="text-[12px] font-medium leading-relaxed">{log.message}</p>
+                  <p className="text-[11px] font-medium leading-relaxed">{log.message}</p>
                 </div>
               </div>
               {log.meta && Object.keys(log.meta).length > 0 && (
