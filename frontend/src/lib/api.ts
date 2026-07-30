@@ -1,5 +1,5 @@
 export interface Intent {
-  action: 'transfer' | 'check_balance' | 'deploy_contract' | 'generate_contract' | 'contract_review' | 'unknown';
+  action: 'transfer' | 'check_balance' | 'deploy_contract' | 'generate_contract' | 'contract_review' | 'contract_call' | 'conditional_payment' | 'escrow' | 'subscription' | 'bounty' | 'unknown';
   amount?: number;
   token?: string;
   recipient?: string;
@@ -9,6 +9,12 @@ export interface Intent {
   contract_type?: string;
   logic_description?: string;
   condition?: string;
+  buyer?: string;
+  seller?: string;
+  frequency?: string;
+  title?: string;
+  reward?: number;
+  description?: string;
   constructor_args?: unknown[];
   constructor_kwargs?: Record<string, unknown>;
   constructor_args_text?: string;
@@ -21,6 +27,13 @@ export interface Intent {
   consensus_max_rotations_text?: string;
   leader_only?: boolean;
   source_file_name?: string;
+  workflow_config?: import('@/types/WorkflowConfig').AnyWorkflowConfig;
+  contract_address?: string;
+  method?: string;
+  args?: unknown[];
+  kwargs?: Record<string, unknown>;
+  workflow_type?: string;
+  next_status?: string;
   [key: string]: unknown;
 }
 
@@ -57,6 +70,7 @@ export interface MessageData {
     specification?: Record<string, unknown>;
     validation?: ContractValidationResult;
   };
+  workflowConfig?: import('@/types/WorkflowConfig').AnyWorkflowConfig;
 }
 
 export interface ChatHistoryPayload {
@@ -143,28 +157,6 @@ export async function verifySignature(address: string, message: string, signatur
   const data = await response.json();
   setStoredAuthToken(address, data.access_token);
   return data.access_token;
-}
-
-export interface PlatformWalletResponse {
-  id: number;
-  user_id: number;
-  address: string;
-  balance: number;
-  created_at: string;
-}
-
-export async function getPlatformWallet(walletAddress: string): Promise<PlatformWalletResponse | null> {
-  const response = await fetch(`${API_URL}/users/me/wallet`, {
-    headers: authHeaders(walletAddress),
-  });
-  if (response.status === 404 || response.status === 401) {
-    return null;
-  }
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.detail || `Failed to fetch platform wallet: ${response.status}`);
-  }
-  return response.json();
 }
 
 export async function getChatHistory(walletAddress: string): Promise<ChatHistoryPayload | null> {
@@ -424,6 +416,22 @@ export interface DeployTxRequestPayload {
   leader_only?: boolean;
 }
 
+export interface WorkflowDeployTxRequestPayload {
+  workflow_config: import('@/types/WorkflowConfig').AnyWorkflowConfig;
+  deploy_value_wei?: string;
+  gas_limit?: number | null;
+  consensus_max_rotations?: number | null;
+  leader_only?: boolean;
+}
+
+export interface WorkflowDeployTxData extends DeployTxData {
+  code: string;
+  contractName: string;
+  constructorArgs: unknown[];
+  constructorKwargs: Record<string, unknown>;
+  workflowConfig: import('@/types/WorkflowConfig').AnyWorkflowConfig;
+}
+
 export async function buildDeployTx(
   payload: DeployTxRequestPayload,
   walletAddress: string,
@@ -451,6 +459,109 @@ export async function buildDeployTx(
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
     throw new Error(errorData.detail || `Failed to prepare deploy transaction: ${response.status}`);
+  }
+
+  const tx = await response.json();
+  return {
+    to: tx.to as Address,
+    data: tx.data as Hex,
+    value: BigInt(tx.value),
+    chainId: tx.chain_id,
+    nonce: tx.nonce,
+    gas: BigInt(tx.gas_limit),
+    gasPrice: tx.gas_price ? BigInt(tx.gas_price) : undefined,
+    maxFeePerGas: tx.max_fee_per_gas ? BigInt(tx.max_fee_per_gas) : undefined,
+    maxPriorityFeePerGas: tx.max_priority_fee_per_gas ? BigInt(tx.max_priority_fee_per_gas) : undefined,
+  };
+}
+
+export async function buildWorkflowDeployTx(
+  payload: WorkflowDeployTxRequestPayload,
+  walletAddress: string,
+  network: NetworkKey
+): Promise<WorkflowDeployTxData> {
+  const response = await fetch(`${API_URL}/chat/workflow-deploy-tx`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders(walletAddress),
+    },
+    body: JSON.stringify({
+      address: walletAddress,
+      workflow_config: payload.workflow_config,
+      value_wei: payload.deploy_value_wei ?? '0',
+      gas_limit: payload.gas_limit ?? null,
+      consensus_max_rotations: payload.consensus_max_rotations ?? null,
+      leader_only: payload.leader_only ?? false,
+      network,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Failed to prepare workflow deployment: ${response.status}`);
+  }
+
+  const tx = await response.json();
+  return {
+    to: tx.to as Address,
+    data: tx.data as Hex,
+    value: BigInt(tx.value),
+    chainId: tx.chain_id,
+    nonce: tx.nonce,
+    gas: BigInt(tx.gas_limit),
+    gasPrice: tx.gas_price ? BigInt(tx.gas_price) : undefined,
+    maxFeePerGas: tx.max_fee_per_gas ? BigInt(tx.max_fee_per_gas) : undefined,
+    maxPriorityFeePerGas: tx.max_priority_fee_per_gas ? BigInt(tx.max_priority_fee_per_gas) : undefined,
+    code: tx.code,
+    contractName: tx.contract_name,
+    constructorArgs: tx.constructor_args,
+    constructorKwargs: tx.constructor_kwargs,
+    workflowConfig: tx.workflow_config,
+  };
+}
+
+export interface ContractCallTxRequestPayload {
+  contract_address: string;
+  method: string;
+  args?: unknown[];
+  kwargs?: Record<string, unknown>;
+  value_wei?: string;
+  gas_limit?: number | null;
+  consensus_max_rotations?: number | null;
+  leader_only?: boolean;
+  workflow_type?: string;
+}
+
+export async function buildContractCallTx(
+  payload: ContractCallTxRequestPayload,
+  walletAddress: string,
+  network: NetworkKey
+): Promise<DeployTxData> {
+  const response = await fetch(`${API_URL}/chat/contract-call-tx`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders(walletAddress),
+    },
+    body: JSON.stringify({
+      address: walletAddress,
+      contract_address: payload.contract_address,
+      method: payload.method,
+      args: payload.args ?? [],
+      kwargs: payload.kwargs ?? {},
+      value_wei: payload.value_wei ?? '0',
+      gas_limit: payload.gas_limit ?? null,
+      consensus_max_rotations: payload.consensus_max_rotations ?? null,
+      leader_only: payload.leader_only ?? false,
+      workflow_type: payload.workflow_type,
+      network,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Failed to prepare contract call: ${response.status}`);
   }
 
   const tx = await response.json();

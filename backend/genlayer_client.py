@@ -2,7 +2,6 @@ import os
 import asyncio
 import re
 from dotenv import load_dotenv
-from genlayer_py import create_account
 from web3 import Web3
 import httpx
 import eth_utils
@@ -29,14 +28,11 @@ def make_calldata_object(
     return ret
 
 class GenLayerClientWrapper:
-    def __init__(self, private_key: str = None, network: str | None = None):
+    def __init__(self, network: str | None = None):
         self.network, rpc_url, chain_id = get_network_config(network)
-        self.private_key = private_key or os.getenv("ADMIN_PRIVATE_KEY")
 
         self.rpc_url = rpc_url
         self.chain_id = chain_id
-        self.account = create_account(self.private_key) if self.private_key else None
-        self.sender_address = self.account.address if self.account else None
         self.receipt_timeout_sec = int(os.getenv("TX_RECEIPT_TIMEOUT_SEC", "45"))
         self.receipt_poll_interval_sec = float(os.getenv("TX_RECEIPT_POLL_INTERVAL_SEC", "1.5"))
 
@@ -106,32 +102,61 @@ class GenLayerClientWrapper:
         selector = eth_utils.keccak(text=contract_fn.signature)[:4].hex()
         return "0x" + selector + params.hex(), Web3.to_checksum_address(consensus_address)
 
-    async def build_deploy_transaction(
+    def _encode_contract_call_data(
         self,
         sender_address: str,
-        code: str,
+        contract_address: str,
+        method: str,
         args: list | None = None,
         kwargs: dict | None = None,
-        value: int = 0,
-        gas_limit: int | None = None,
         consensus_max_rotations: int | None = None,
         leader_only: bool = False,
-        ) -> dict:
+    ) -> tuple[str, str]:
+        chain = self._chain_config()
+        consensus_contract = chain.consensus_main_contract
+        if not consensus_contract:
+            raise RuntimeError(f"Consensus contract is not configured for {self.network}")
+        consensus_address = os.getenv("GENLAYER_CONSENSUS_CONTRACT_ADDRESS")
+        if not consensus_address:
+            raise RuntimeError("GENLAYER_CONSENSUS_CONTRACT_ADDRESS is not set")
+
+        rotations = consensus_max_rotations or chain.default_consensus_max_rotations
+        serialized_data = serialize([
+            calldata.encode(make_calldata_object(method=method, args=args or [], kwargs=kwargs or {})),
+            leader_only,
+        ])
+
+        contract = Web3().eth.contract(abi=consensus_contract["abi"])
+        contract_fn = contract.get_function_by_name("addTransaction")
+        add_transaction_args = [
+            Web3.to_checksum_address(sender_address),
+            Web3.to_checksum_address(contract_address),
+            chain.default_number_of_initial_validators,
+            rotations,
+            Web3.to_bytes(hexstr=serialized_data),
+        ]
+        if len(contract_fn.argument_types) >= 6:
+            add_transaction_args.append(0)
+
+        params = abi_encode(contract_fn.argument_types, add_transaction_args)
+        selector = eth_utils.keccak(text=contract_fn.signature)[:4].hex()
+        return "0x" + selector + params.hex(), Web3.to_checksum_address(consensus_address)
+
+    async def _build_wallet_transaction(
+        self,
+        sender_address: str,
+        to_address: str,
+        encoded_data: str,
+        value: int = 0,
+        gas_limit: int | None = None,
+    ) -> dict:
         checksum_sender = Web3.to_checksum_address(sender_address)
-        encoded_data, consensus_address = self._encode_deploy_contract_data(
-            sender_address=checksum_sender,
-            code=code,
-            args=args,
-            kwargs=kwargs,
-            consensus_max_rotations=consensus_max_rotations,
-            leader_only=leader_only,
-        )
         nonce_hex = await self._rpc_call("eth_getTransactionCount", [checksum_sender, "pending"])
         nonce = int(nonce_hex, 16)
 
         tx_for_estimate = {
             "from": checksum_sender,
-            "to": consensus_address,
+            "to": Web3.to_checksum_address(to_address),
             "data": encoded_data,
             "value": hex(value),
         }
@@ -168,7 +193,7 @@ class GenLayerClientWrapper:
                 estimated_gas = 1_500_000
 
         return {
-            "to": consensus_address,
+            "to": Web3.to_checksum_address(to_address),
             "data": encoded_data,
             "value": value,
             "chain_id": self.chain_id,
@@ -176,6 +201,64 @@ class GenLayerClientWrapper:
             "gas_limit": estimated_gas,
             **fee_fields,
         }
+
+    async def build_deploy_transaction(
+        self,
+        sender_address: str,
+        code: str,
+        args: list | None = None,
+        kwargs: dict | None = None,
+        value: int = 0,
+        gas_limit: int | None = None,
+        consensus_max_rotations: int | None = None,
+        leader_only: bool = False,
+        ) -> dict:
+        checksum_sender = Web3.to_checksum_address(sender_address)
+        encoded_data, consensus_address = self._encode_deploy_contract_data(
+            sender_address=checksum_sender,
+            code=code,
+            args=args,
+            kwargs=kwargs,
+            consensus_max_rotations=consensus_max_rotations,
+            leader_only=leader_only,
+        )
+        return await self._build_wallet_transaction(
+            sender_address=checksum_sender,
+            to_address=consensus_address,
+            encoded_data=encoded_data,
+            value=value,
+            gas_limit=gas_limit,
+        )
+
+    async def build_contract_call_transaction(
+        self,
+        sender_address: str,
+        contract_address: str,
+        method: str,
+        args: list | None = None,
+        kwargs: dict | None = None,
+        value: int = 0,
+        gas_limit: int | None = None,
+        consensus_max_rotations: int | None = None,
+        leader_only: bool = False,
+    ) -> dict:
+        checksum_sender = Web3.to_checksum_address(sender_address)
+        encoded_data, consensus_address = self._encode_contract_call_data(
+            sender_address=checksum_sender,
+            contract_address=contract_address,
+            method=method,
+            args=args,
+            kwargs=kwargs,
+            consensus_max_rotations=consensus_max_rotations,
+            leader_only=leader_only,
+        )
+        return await self._build_wallet_transaction(
+            sender_address=checksum_sender,
+            to_address=consensus_address,
+            encoded_data=encoded_data,
+            value=value,
+            gas_limit=gas_limit,
+        )
 
     async def get_consensus_transaction_id(self, evm_tx_hash: str) -> str | None:
         receipt = await self._rpc_call("eth_getTransactionReceipt", [evm_tx_hash])
@@ -244,49 +327,6 @@ class GenLayerClientWrapper:
         # GenLayer uses 18 decimals like ETH
         return float(Web3.from_wei(balance_wei, 'ether'))
 
-    async def send_transfer(self, to_address: str, amount: float) -> str:
-        if not self.account or not self.sender_address:
-            raise ValueError("Private key is required for sending transfers")
-
-        try:
-            # Sign locally and broadcast raw transaction to avoid RPC signer requirements.
-            checksum_to = Web3.to_checksum_address(to_address)
-            nonce_hex = await self._rpc_call("eth_getTransactionCount", [self.sender_address, "pending"])
-            nonce = int(nonce_hex, 16)
-            value = Web3.to_wei(amount, "ether")
-
-            tx_params = {
-                "from": self.sender_address,
-                "to": checksum_to,
-                "value": value,
-                "nonce": nonce,
-                "chainId": self.chain_id,
-            }
-
-            try:
-                gas_hex = await self._rpc_call(
-                    "eth_estimateGas",
-                    [{"from": self.sender_address, "to": checksum_to, "value": hex(value)}],
-                )
-                tx_params["gas"] = int(gas_hex, 16)
-            except Exception:
-                tx_params["gas"] = 21000
-
-            try:
-                gas_price_hex = await self._rpc_call("eth_gasPrice", [])
-                tx_params["gasPrice"] = int(gas_price_hex, 16)
-            except Exception:
-                pass
-
-            signed = self.account.sign_transaction(tx_params)
-            raw_tx = Web3.to_hex(signed.raw_transaction)
-            tx_hash = await self._rpc_call("eth_sendRawTransaction", [raw_tx])
-            await self._wait_for_receipt_or_raise(tx_hash)
-            return tx_hash
-        except Exception as e:
-            print(f"Error sending transfer: {e}")
-            raise e
-
     async def _wait_for_receipt_or_raise(self, tx_hash: str):
         loop = asyncio.get_event_loop()
         deadline = loop.time() + self.receipt_timeout_sec
@@ -307,11 +347,9 @@ class GenLayerClientWrapper:
 _client_wrapper = None
 _network_clients = {}
 
-def get_client(private_key: str = None, network: str | None = None):
+def get_client(network: str | None = None):
     global _client_wrapper
     global _network_clients
-    if private_key:
-        return GenLayerClientWrapper(private_key, network=network)
     if network is None:
         if _client_wrapper is None:
             _client_wrapper = GenLayerClientWrapper()
@@ -321,8 +359,5 @@ def get_client(private_key: str = None, network: str | None = None):
         _network_clients[network] = GenLayerClientWrapper(network=network)
     return _network_clients[network]
 
-async def get_balance(address: str, private_key: str = None, network: str | None = None) -> float:
-    return await get_client(private_key, network=network).get_balance(address)
-
-async def send_transfer(to_address: str, amount: float, private_key: str = None, network: str | None = None) -> str:
-    return await get_client(private_key, network=network).send_transfer(to_address, amount)
+async def get_balance(address: str, network: str | None = None) -> float:
+    return await get_client(network=network).get_balance(address)

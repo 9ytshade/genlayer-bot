@@ -12,11 +12,19 @@ from ..database import get_db
 from ..genlayer_client import get_balance, get_client
 from ..intent_parser import parse_intent
 from ..logs_store import logs_store
-from ..models import ChatHistory, User
+from ..models import ChatHistory, User, WorkflowDeployment
 from ..network_config import normalize_network
 from ..rate_limit import limiter
 from ..safety import normalize_intent, validate_intent
 from ..services.contract_generation_service import ContractGenerationService
+from ..services.workflow_service import (
+    WorkflowValidationError,
+    generate_workflow_contract_code,
+    get_workflow_constructor_args,
+    get_workflow_contract_name,
+    validate_workflow_action,
+    validate_workflow_config,
+)
 from ..simulator import simulate_intent
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -78,6 +86,38 @@ class DeployTxResponse(BaseModel):
     max_priority_fee_per_gas: str | None = None
 
 
+class WorkflowDeployTxRequest(BaseModel):
+    address: str
+    workflow_config: dict[str, Any]
+    value_wei: str = "0"
+    gas_limit: int | None = None
+    consensus_max_rotations: int | None = None
+    leader_only: bool = False
+    network: str | None = None
+
+
+class WorkflowDeployTxResponse(DeployTxResponse):
+    code: str
+    contract_name: str
+    constructor_args: list[Any]
+    constructor_kwargs: dict[str, Any] = Field(default_factory=dict)
+    workflow_config: dict[str, Any]
+
+
+class ContractCallTxRequest(BaseModel):
+    address: str
+    contract_address: str
+    method: str
+    args: list[Any] = Field(default_factory=list)
+    kwargs: dict[str, Any] = Field(default_factory=dict)
+    value_wei: str = "0"
+    gas_limit: int | None = None
+    consensus_max_rotations: int | None = None
+    leader_only: bool = False
+    network: str | None = None
+    workflow_type: str | None = None
+
+
 class ContractValidationRequest(BaseModel):
     code: str
     file_name: str | None = None
@@ -105,14 +145,76 @@ def get_wallet_address(authorization: str | None = Header(None)) -> str | None:
     return get_wallet_address_from_authorization(authorization)
 
 
+def get_optional_user_from_authorization(authorization: str | None, db: Session) -> User | None:
+    wallet_address = get_wallet_address_from_authorization(authorization)
+    if not wallet_address:
+        return None
+    return db.query(User).filter(User.connected_wallet_address == wallet_address).first()
+
+
+def persist_workflow_deployment(
+    db: Session,
+    user: User | None,
+    intent: dict[str, Any],
+    network: str,
+    tx_hash: str,
+    consensus_tx_id: str | None,
+    contract_address: str | None,
+) -> None:
+    workflow_config = intent.get("workflow_config")
+    if not user or not isinstance(workflow_config, dict):
+        return
+
+    try:
+        validated_config = validate_workflow_config(workflow_config, user.connected_wallet_address)
+    except WorkflowValidationError:
+        return
+
+    deployment = WorkflowDeployment(
+        user_id=user.id,
+        workflow_type=validated_config["workflowType"],
+        network=network,
+        config_json=json.dumps(validated_config, separators=(",", ":")),
+        contract_address=contract_address,
+        deploy_tx_hash=tx_hash,
+        consensus_tx_id=consensus_tx_id,
+        status="active" if contract_address else "deployed",
+    )
+    db.add(deployment)
+    db.commit()
+
+
+def persist_workflow_action(
+    db: Session,
+    user: User | None,
+    intent: dict[str, Any],
+    tx_hash: str,
+) -> None:
+    if not user:
+        return
+    contract_address = intent.get("contract_address")
+    if not isinstance(contract_address, str):
+        return
+    deployment = (
+        db.query(WorkflowDeployment)
+        .filter(
+            WorkflowDeployment.user_id == user.id,
+            WorkflowDeployment.contract_address == Web3.to_checksum_address(contract_address),
+        )
+        .order_by(WorkflowDeployment.created_at.desc())
+        .first()
+    )
+    if not deployment:
+        return
+    deployment.last_action = str(intent.get("method") or "")
+    deployment.last_action_tx_hash = tx_hash
+    deployment.status = str(intent.get("next_status") or deployment.status)
+    db.commit()
+
+
 def resolve_balance_address(header_address: str | None) -> str:
     if header_address:
         return header_address
-
-    env_address = os.getenv("ADMIN_WALLET_ADDRESS")
-    if env_address:
-        return env_address
-
     raise HTTPException(status_code=400, detail="No wallet address provided for balance lookup")
 
 
@@ -210,6 +312,38 @@ def save_chat_history(
     return payload
 
 
+@router.get("/workflows")
+def get_workflows(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    deployments = (
+        db.query(WorkflowDeployment)
+        .filter(WorkflowDeployment.user_id == current_user.id)
+        .order_by(WorkflowDeployment.updated_at.desc())
+        .all()
+    )
+    return {
+        "workflows": [
+            {
+                "id": deployment.id,
+                "workflowType": deployment.workflow_type,
+                "network": deployment.network,
+                "config": json.loads(deployment.config_json),
+                "contractAddress": deployment.contract_address,
+                "deployTxHash": deployment.deploy_tx_hash,
+                "consensusTxId": deployment.consensus_tx_id,
+                "status": deployment.status,
+                "lastAction": deployment.last_action,
+                "lastActionTxHash": deployment.last_action_tx_hash,
+                "createdAt": deployment.created_at.isoformat() if deployment.created_at else None,
+                "updatedAt": deployment.updated_at.isoformat() if deployment.updated_at else None,
+            }
+            for deployment in deployments
+        ]
+    }
+
+
 @router.post("")
 @limiter.limit("10/minute")
 async def handle_chat(request: Request, chat_request: ChatRequest):
@@ -290,7 +424,7 @@ async def handle_chat(request: Request, chat_request: ChatRequest):
             },
         }
 
-    intent = normalize_intent(parse_intent(chat_request.message))
+    intent = normalize_intent(parse_intent(chat_request.message, chat_request.wallet_address))
     if intent.get("action") == "unknown" and is_deploy_contract_request(chat_request.message):
         intent = {"action": "deploy_contract"}
 
@@ -363,9 +497,14 @@ async def handle_chat(request: Request, chat_request: ChatRequest):
     }
 
 @router.post("/confirm")
-async def confirm_action(request: ConfirmRequest, authorization: str | None = Header(None)):
+async def confirm_action(
+    request: ConfirmRequest,
+    authorization: str | None = Header(None),
+    db: Session = Depends(get_db),
+):
     intent = normalize_intent(request.intent)
     network = resolve_network_or_400(request.network)
+    current_user = get_optional_user_from_authorization(authorization, db)
     await logs_store.append("INFO", "CONFIRM_RECEIVED", "Execution confirmed by user.", {"intent": intent, "network": network})
 
     is_safe, error_msg = validate_intent(intent)
@@ -410,6 +549,15 @@ async def confirm_action(request: ConfirmRequest, authorization: str | None = He
             await client._wait_for_receipt_or_raise(tx_hash)
             consensus_tx_id = await client.get_consensus_transaction_id(tx_hash)
             deployment_details = await client.get_deployment_details(consensus_tx_id)
+            persist_workflow_deployment(
+                db=db,
+                user=current_user,
+                intent=intent,
+                network=network,
+                tx_hash=tx_hash,
+                consensus_tx_id=consensus_tx_id,
+                contract_address=deployment_details["contract_address"],
+            )
             await logs_store.append(
                 "SUCCESS",
                 "DEPLOY_SUCCESS",
@@ -431,6 +579,30 @@ async def confirm_action(request: ConfirmRequest, authorization: str | None = He
         except Exception as e:
             await logs_store.append("ERROR", "DEPLOY_FAILED", "Deployment process failed.", {"error": str(e), "intent": intent})
             raise HTTPException(status_code=502, detail=f"Deployment failed: {str(e)}")
+
+    if intent["action"] == "contract_call":
+        if not request.signed_transaction and not request.tx_hash:
+            raise HTTPException(status_code=400, detail="Contract call requires tx_hash or signed_transaction from user wallet")
+        try:
+            client = get_client(network=network)
+            tx_hash = request.tx_hash or await client._rpc_call("eth_sendRawTransaction", [request.signed_transaction])
+            await client._wait_for_receipt_or_raise(tx_hash)
+            consensus_tx_id = await client.get_consensus_transaction_id(tx_hash)
+            persist_workflow_action(db=db, user=current_user, intent=intent, tx_hash=tx_hash)
+            await logs_store.append(
+                "SUCCESS",
+                "CONTRACT_CALL_SUCCESS",
+                "Contract method transaction accepted by GenLayer.",
+                {"txHash": tx_hash, "consensusTxId": consensus_tx_id, "method": intent.get("method")},
+            )
+            return {
+                "txHash": tx_hash,
+                "consensusTxId": consensus_tx_id,
+                "content": "Workflow action submitted to GenLayer.",
+            }
+        except Exception as e:
+            await logs_store.append("ERROR", "CONTRACT_CALL_FAILED", "Contract call failed.", {"error": str(e), "intent": intent})
+            raise HTTPException(status_code=502, detail=f"Contract call failed: {str(e)}")
 
     await logs_store.append("ERROR", "UNSUPPORTED_ACTION", "Unsupported action during confirmation.", {"intent": intent})
     raise HTTPException(status_code=400, detail="Unsupported action for execution")
@@ -485,6 +657,113 @@ async def build_deploy_tx(request: DeployTxRequest) -> DeployTxResponse:
     except Exception as e:
         await logs_store.append("ERROR", "DEPLOY_TX_BUILD_FAILED", "Failed to prepare deployment transaction.", {"error": str(e)})
         raise HTTPException(status_code=502, detail=f"Failed to prepare deployment transaction: {str(e)}")
+
+
+@router.post("/workflow-deploy-tx")
+async def build_workflow_deploy_tx(request: WorkflowDeployTxRequest) -> WorkflowDeployTxResponse:
+    """Build a deploy transaction from a trusted backend workflow template."""
+    try:
+        network = resolve_network_or_400(request.network)
+        checksum_address = Web3.to_checksum_address(request.address)
+        validated_config = validate_workflow_config(request.workflow_config, checksum_address)
+        code = generate_workflow_contract_code(validated_config)
+        constructor_args = get_workflow_constructor_args(validated_config, checksum_address)
+        value = int(request.value_wei or "0")
+        if value < 0:
+            raise ValueError("Deployment value cannot be negative")
+
+        client = get_client(network=network)
+        tx = await client.build_deploy_transaction(
+            sender_address=checksum_address,
+            code=code,
+            args=constructor_args,
+            kwargs={},
+            value=value,
+            gas_limit=request.gas_limit,
+            consensus_max_rotations=request.consensus_max_rotations,
+            leader_only=request.leader_only,
+        )
+        await logs_store.append(
+            "INFO",
+            "WORKFLOW_DEPLOY_TX_BUILD",
+            "Preparing trusted workflow deployment transaction.",
+            {"network": network, "workflowType": validated_config["workflowType"], "from": checksum_address},
+        )
+        return WorkflowDeployTxResponse(
+            chain_id=tx["chain_id"],
+            to=tx["to"],
+            data=tx["data"],
+            value=str(tx["value"]),
+            nonce=tx["nonce"],
+            gas_limit=tx["gas_limit"],
+            rpc_url=client.rpc_url,
+            gas_price=str(tx["gasPrice"]) if "gasPrice" in tx else None,
+            max_fee_per_gas=str(tx["maxFeePerGas"]) if "maxFeePerGas" in tx else None,
+            max_priority_fee_per_gas=str(tx["maxPriorityFeePerGas"]) if "maxPriorityFeePerGas" in tx else None,
+            code=code,
+            contract_name=get_workflow_contract_name(validated_config),
+            constructor_args=constructor_args,
+            constructor_kwargs={},
+            workflow_config=validated_config,
+        )
+    except WorkflowValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as e:
+        await logs_store.append("ERROR", "WORKFLOW_DEPLOY_TX_BUILD_FAILED", "Failed to prepare workflow deployment.", {"error": str(e)})
+        raise HTTPException(status_code=502, detail=f"Failed to prepare workflow deployment: {str(e)}")
+
+
+@router.post("/contract-call-tx")
+async def build_contract_call_tx(request: ContractCallTxRequest) -> DeployTxResponse:
+    """Build a GenLayer consensus transaction for a deployed contract method call."""
+    try:
+        network = resolve_network_or_400(request.network)
+        checksum_address = Web3.to_checksum_address(request.address)
+        checksum_contract = Web3.to_checksum_address(request.contract_address)
+        method = request.method.strip()
+        if not method:
+            raise ValueError("Method is required")
+        if request.workflow_type:
+            validate_workflow_action(request.workflow_type, method, request.args)
+        value = int(request.value_wei or "0")
+        if value < 0:
+            raise ValueError("Contract call value cannot be negative")
+
+        client = get_client(network=network)
+        tx = await client.build_contract_call_transaction(
+            sender_address=checksum_address,
+            contract_address=checksum_contract,
+            method=method,
+            args=request.args,
+            kwargs=request.kwargs,
+            value=value,
+            gas_limit=request.gas_limit,
+            consensus_max_rotations=request.consensus_max_rotations,
+            leader_only=request.leader_only,
+        )
+        await logs_store.append(
+            "INFO",
+            "CONTRACT_CALL_TX_BUILD",
+            "Preparing GenLayer contract method transaction.",
+            {"network": network, "from": checksum_address, "contract": checksum_contract, "method": method},
+        )
+        return DeployTxResponse(
+            chain_id=tx["chain_id"],
+            to=tx["to"],
+            data=tx["data"],
+            value=str(tx["value"]),
+            nonce=tx["nonce"],
+            gas_limit=tx["gas_limit"],
+            rpc_url=client.rpc_url,
+            gas_price=str(tx["gasPrice"]) if "gasPrice" in tx else None,
+            max_fee_per_gas=str(tx["maxFeePerGas"]) if "maxFeePerGas" in tx else None,
+            max_priority_fee_per_gas=str(tx["maxPriorityFeePerGas"]) if "maxPriorityFeePerGas" in tx else None,
+        )
+    except WorkflowValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as e:
+        await logs_store.append("ERROR", "CONTRACT_CALL_TX_BUILD_FAILED", "Failed to prepare contract call.", {"error": str(e)})
+        raise HTTPException(status_code=502, detail=f"Failed to prepare contract call: {str(e)}")
 
 
 @router.post("/validate-contract")

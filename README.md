@@ -2,7 +2,7 @@
 
 GenLayer Bot is a full-stack chat interface for interacting with GenLayer networks through natural language. A connected wallet can check balances, send tokens, upload Python intelligent contracts, review deployment parameters, and submit Studionet deployment transactions from a guided chat UI.
 
-The core rule of the app is simple: the bot never executes raw LLM output directly. User requests are parsed into structured intents, validated, simulated where possible, shown back to the user, and only executed after explicit confirmation.
+The core rule of the app is simple: the bot never executes raw LLM output directly. User requests are parsed into structured intents, validated, simulated where possible, shown back to the user, and only executed after explicit confirmation from the connected wallet. The app is user-wallet-only: the backend prepares GenLayer transaction data, and the connected wallet signs.
 
 ## Current Features
 
@@ -20,6 +20,8 @@ The core rule of the app is simple: the bot never executes raw LLM output direct
 - In-chat deploy parameter editor for constructor args, kwargs, value, gas limit, rotations, and leader-only mode
 - Studionet deployment transaction builder using the GenLayer consensus contract
 - Deployment result display with EVM tx hash, consensus tx id, contract address, and generated addresses
+- Trusted workflow templates for conditional payments, escrow, subscriptions, and bounties
+- GenLayer contract-call transaction builder for deployed workflow actions
 - Live activity log panel with in-memory logs locally and optional Redis-backed logs in production
 - Render-ready backend deployment with Supabase Postgres
 - Vercel-ready frontend deployment
@@ -103,8 +105,8 @@ Important files:
 - `main.py`: FastAPI setup, CORS, health check, router registration, startup migrations
 - `auth.py`: SIWE nonce and signature verification, JWT issuing, authenticated user lookup
 - `routers/chat.py`: chat, confirmation, deploy transaction, validation, and tx parameter endpoints
-- `routers/wallet.py`: wallet balance and admin funding endpoints
-- `genlayer_client.py`: async JSON-RPC wrapper and GenLayer deployment transaction builder
+- `routers/wallet.py`: connected wallet balance endpoint
+- `genlayer_client.py`: async JSON-RPC wrapper plus GenLayer deployment and contract-call transaction builders
 - `contract_validation.py`: Python contract validation
 - `database.py`, `models.py`, `alembic/`: SQLAlchemy models and migrations
 - `logs_store.py`: in-memory logs locally and Redis-backed logs when `REDIS_URL` is set
@@ -128,7 +130,6 @@ Use the equivalent activation command for macOS or Linux if needed.
 
 ```bash
 DATABASE_URL=sqlite:///./genlayer_bot.db
-ENCRYPTION_KEY=your_permanent_fernet_key
 JWT_SECRET=your_long_random_secret
 GROQ_API_KEY=your_groq_api_key_here
 
@@ -138,18 +139,10 @@ GENLAYER_CHAIN_ID_STUDIONET=61999
 GENLAYER_CHAIN_ID_BRADBURY=4221
 GENLAYER_CONSENSUS_CONTRACT_ADDRESS=0xb7278A61aa25c888815aFC32Ad3cC52fF24fE575
 
-ADMIN_PRIVATE_KEY=
-ADMIN_WALLET_ADDRESS=
 MAX_TRANSFER_AMOUNT=1000
 SUPPORTED_TOKENS=GEN
 ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
 REDIS_URL=
-```
-
-Generate `ENCRYPTION_KEY` once and keep it permanently:
-
-```bash
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
 Generate `JWT_SECRET`:
@@ -157,8 +150,6 @@ Generate `JWT_SECRET`:
 ```bash
 python -c "import secrets; print(secrets.token_urlsafe(64))"
 ```
-
-Do not rotate `ENCRYPTION_KEY` after encrypted data has been stored.
 
 ## Frontend
 
@@ -229,6 +220,15 @@ NEXT_PUBLIC_BRADBURY_RPC=https://rpc-bradbury.genlayer.com
 6. Frontend sends it through the connected wallet.
 7. Backend polls the receipt, extracts consensus and deployment details, and returns them to chat.
 
+### Workflow Contracts
+
+1. User describes a conditional payment, escrow, subscription, or bounty.
+2. The UI and backend validate the workflow configuration.
+3. Backend selects the trusted workflow template and builds the GenLayer deployment transaction.
+4. User signs deployment from their connected wallet.
+5. Dashboard actions build GenLayer contract-call transactions through the backend and are signed by the connected wallet.
+6. Backend confirms receipts and stores workflow deployment/action metadata for the authenticated wallet.
+
 ### Chat History
 
 Chat history is stored client-side in `localStorage`, scoped by connected wallet address. Refreshing the app restores the current wallet's chats. Connecting a different wallet loads that wallet's own chat list, so users do not see another wallet's conversations in the same browser.
@@ -270,7 +270,6 @@ Render environment variables:
 
 ```bash
 DATABASE_URL=your_supabase_postgres_url
-ENCRYPTION_KEY=your_existing_encryption_key
 JWT_SECRET=your_jwt_secret
 GROQ_API_KEY=your_groq_key
 GENLAYER_RPC_URL_STUDIONET=https://studio.genlayer.com/api
@@ -278,8 +277,6 @@ GENLAYER_RPC_URL_BRADBURY=https://rpc-bradbury.genlayer.com
 GENLAYER_CHAIN_ID_STUDIONET=61999
 GENLAYER_CHAIN_ID_BRADBURY=4221
 GENLAYER_CONSENSUS_CONTRACT_ADDRESS=0xb7278A61aa25c888815aFC32Ad3cC52fF24fE575
-ADMIN_PRIVATE_KEY=
-ADMIN_WALLET_ADDRESS=
 MAX_TRANSFER_AMOUNT=1000
 SUPPORTED_TOKENS=GEN
 ALLOWED_ORIGINS=https://your-frontend-domain.com,http://localhost:3000,http://127.0.0.1:3000
@@ -338,9 +335,8 @@ npm run build
 
 ## Security Notes
 
-- Never commit `.env` files, private keys, generated encryption keys, JWT secrets, or wallet secrets.
-- `ADMIN_PRIVATE_KEY` is server-side only and should never be exposed to the frontend.
-- `ENCRYPTION_KEY` must be stable and permanent.
+- Never commit `.env` files, private keys, JWT secrets, or wallet secrets.
+- The backend must only prepare GenLayer transaction data; the connected wallet signs user transactions.
 - Backend auth uses SIWE nonces and JWTs; do not replace it with raw wallet-address bearer tokens.
 - Contract uploads are validated for file type and Python structure, but deeper semantic auditing is still future hardening.
 - Use Supabase RLS policies if you expose any tables through Supabase APIs.
@@ -356,17 +352,18 @@ Completed:
 - Supabase Postgres database target
 - Render backend deployment support
 - Studionet deploy transaction builder
+- GenLayer workflow contract-call transaction builder
 - Python contract upload and validation
 - Deploy parameter UI
 - Deployment result display
 - Wallet-scoped chat history
 - Desktop chat sidebar
 - Automatic wallet network switching
+- Trusted workflow templates and persisted workflow deployment metadata
 - Vercel frontend deployment support
 
 Planned hardening:
 
-- Persistent server-side chat history
 - Database-backed transaction history
 - Production Redis for logs and live activity events
 - Better semantic validation for intelligent contracts

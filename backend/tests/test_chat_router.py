@@ -1,6 +1,5 @@
 import os
 
-os.environ.setdefault("ENCRYPTION_KEY", "SC5Vv1b3Ug2fqGvnnY8ctC-fNvUj_JoyK5zB1w8OX3E=")
 os.environ.setdefault("JWT_SECRET", "test-secret")
 os.environ.setdefault("DATABASE_URL", "sqlite:///./test_chat_router.db")
 
@@ -14,7 +13,7 @@ from backend.routers import chat
 
 
 def test_chat_router_returns_unknown_for_unparsed_message(monkeypatch):
-    monkeypatch.setattr(chat, "parse_intent", lambda _: {"action": "unknown"})
+    monkeypatch.setattr(chat, "parse_intent", lambda _message, _wallet_address=None: {"action": "unknown"})
 
     with TestClient(app) as client:
         response = client.post("/chat", json={"message": "hello", "network": "studionet"})

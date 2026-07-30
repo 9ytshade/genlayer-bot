@@ -2,7 +2,20 @@ import os
 from typing import Any
 from web3 import Web3
 
-SUPPORTED_ACTIONS = {"transfer", "check_balance", "deploy_contract", "create_contract", "generate_contract", "contract_review", "unknown"}
+SUPPORTED_ACTIONS = {
+    "transfer",
+    "check_balance",
+    "deploy_contract",
+    "create_contract",
+    "generate_contract",
+    "contract_review",
+    "contract_call",
+    "conditional_payment",
+    "escrow",
+    "subscription",
+    "bounty",
+    "unknown",
+}
 
 
 def normalize_intent(raw_intent: dict[str, Any]) -> dict[str, Any]:
@@ -73,6 +86,10 @@ def normalize_intent(raw_intent: dict[str, Any]) -> dict[str, Any]:
         if recipient:
             intent["recipient"] = str(recipient).strip()
 
+        workflow_config = raw_intent.get("workflow_config")
+        if isinstance(workflow_config, dict):
+            intent["workflow_config"] = workflow_config
+
     elif action == "generate_contract":
         intent["logic_description"] = str(raw_intent.get("logic_description", raw_intent.get("prompt", ""))).strip()
         intent["advanced"] = bool(raw_intent.get("advanced", False))
@@ -82,6 +99,49 @@ def normalize_intent(raw_intent: dict[str, Any]) -> dict[str, Any]:
 
     elif action == "contract_review":
         intent["status"] = "reserved"
+
+    elif action == "contract_call":
+        intent["contract_address"] = str(raw_intent.get("contract_address", "")).strip()
+        intent["method"] = str(raw_intent.get("method", "")).strip()
+        args = raw_intent.get("args", [])
+        intent["args"] = args if isinstance(args, list) else []
+        kwargs = raw_intent.get("kwargs", {})
+        intent["kwargs"] = kwargs if isinstance(kwargs, dict) else {}
+        workflow_type = raw_intent.get("workflow_type")
+        if workflow_type:
+            intent["workflow_type"] = str(workflow_type).strip().lower()
+        next_status = raw_intent.get("next_status")
+        if next_status:
+            intent["next_status"] = str(next_status).strip().lower()
+
+    elif action in {"conditional_payment", "escrow", "subscription", "bounty"}:
+        token = str(raw_intent.get("token", "GEN")).strip().upper()
+        intent["token"] = token or "GEN"
+        if action in {"conditional_payment", "subscription"}:
+            intent["recipient"] = str(raw_intent.get("recipient", "")).strip()
+            try:
+                intent["amount"] = float(raw_intent.get("amount") or 0)
+            except (TypeError, ValueError):
+                intent["amount"] = 0
+        if action == "conditional_payment":
+            intent["condition"] = str(raw_intent.get("condition", "")).strip()
+        if action == "subscription":
+            intent["frequency"] = str(raw_intent.get("frequency", "")).strip().lower()
+        if action == "escrow":
+            intent["buyer"] = str(raw_intent.get("buyer", "")).strip()
+            intent["seller"] = str(raw_intent.get("seller", "")).strip()
+            intent["description"] = str(raw_intent.get("description", "")).strip()
+            try:
+                intent["amount"] = float(raw_intent.get("amount") or 0)
+            except (TypeError, ValueError):
+                intent["amount"] = 0
+        if action == "bounty":
+            intent["title"] = str(raw_intent.get("title", "")).strip()
+            intent["description"] = str(raw_intent.get("description", "")).strip()
+            try:
+                intent["reward"] = float(raw_intent.get("reward") or 0)
+            except (TypeError, ValueError):
+                intent["reward"] = 0
 
     return intent
 
@@ -146,5 +206,23 @@ def validate_intent(intent: dict[str, Any]) -> tuple[bool, str]:
 
     if intent.get("action") == "contract_review":
         return False, "Contract review is reserved for a future release."
+
+    if intent.get("action") == "contract_call":
+        contract_address = intent.get("contract_address")
+        if not contract_address:
+            return False, "Contract address is missing."
+        if not Web3.is_address(contract_address):
+            return False, "Contract address is invalid."
+        if not intent.get("method"):
+            return False, "Contract method is missing."
+
+    if intent.get("action") in {"conditional_payment", "escrow", "subscription", "bounty"}:
+        try:
+            from .services.workflow_service import WorkflowValidationError, validate_workflow_config
+
+            workflow_config = {"workflowType": intent["action"], **intent}
+            validate_workflow_config(workflow_config, intent.get("buyer"))
+        except WorkflowValidationError as exc:
+            return False, str(exc)
 
     return True, ""

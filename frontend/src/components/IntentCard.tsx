@@ -1,6 +1,6 @@
 import React from 'react';
 import { Intent } from '../lib/api';
-import { TerminalSquare, Send, Wallet, FileCode, Sparkles, ClipboardCheck } from 'lucide-react';
+import { TerminalSquare, Send, Wallet, FileCode, Sparkles, ClipboardCheck, Repeat, Handshake, Trophy, Workflow } from 'lucide-react';
 import RiskIndicator from './RiskIndicator';
 
 const ACTION_ICON = {
@@ -9,6 +9,11 @@ const ACTION_ICON = {
   deploy_contract: FileCode,
   generate_contract: Sparkles,
   contract_review: ClipboardCheck,
+  contract_call: Workflow,
+  conditional_payment: Send,
+  escrow: Handshake,
+  subscription: Repeat,
+  bounty: Trophy,
   unknown: TerminalSquare,
 } as const;
 
@@ -27,6 +32,16 @@ export default function IntentCard({ intent }: { intent: Intent }) {
         return 'CONTRACT_GENERATION';
       case 'contract_review':
         return 'CONTRACT_REVIEW';
+      case 'contract_call':
+        return 'CONTRACT_CALL';
+      case 'conditional_payment':
+        return 'CONDITIONAL_PAYMENT';
+      case 'escrow':
+        return 'ESCROW_WORKFLOW';
+      case 'subscription':
+        return 'SUBSCRIPTION_WORKFLOW';
+      case 'bounty':
+        return 'BOUNTY_WORKFLOW';
       default:
         return intent.action.toUpperCase();
     }
@@ -65,7 +80,24 @@ export default function IntentCard({ intent }: { intent: Intent }) {
           </div>
         )}
 
-        {intent.action !== 'transfer' && intent.action !== 'check_balance' && (
+        {intent.action === 'contract_call' && (
+          <div className="flex flex-col gap-2">
+            <div className="flex justify-between border-b border-border-subtle border-dotted pb-1">
+              <span className="text-text-muted">CONTRACT:</span>
+              <span className="text-accent-primary font-bold">{intent.contract_address || 'UNKNOWN'}</span>
+            </div>
+            <div className="flex justify-between border-b border-border-subtle border-dotted pb-1">
+              <span className="text-text-muted">METHOD:</span>
+              <span className="text-accent-success font-bold">{intent.method || 'UNKNOWN'}</span>
+            </div>
+            <div className="flex justify-between border-b border-border-subtle border-dotted pb-1">
+              <span className="text-text-muted">ARGS:</span>
+              <span className="text-text-secondary">{JSON.stringify(intent.args || [])}</span>
+            </div>
+          </div>
+        )}
+
+        {intent.action !== 'transfer' && intent.action !== 'check_balance' && intent.action !== 'contract_call' && (
           <div className="flex flex-col gap-2">
             <div className="flex justify-between border-b border-border-subtle border-dotted pb-1">
               <span className="text-text-muted">CONTRACT:</span>

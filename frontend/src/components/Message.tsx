@@ -4,6 +4,7 @@ import IntentCard from './IntentCard';
 import SimulationCard from './SimulationCard';
 import ConfirmationButtons from './ConfirmationButtons';
 import DeployContractPanel from './DeployContractPanel';
+import { WorkflowPanel } from './WorkflowPanel';
 import { Bot, UserRound, Check, Loader2, Copy, AlertCircle, RefreshCw, Download, Rocket, ExternalLink } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -12,10 +13,11 @@ interface MessageProps {
   onConfirm: (id: string) => void;
   onCancel: (id: string) => void;
   onUpdateIntent: (id: string, patch: Partial<NonNullable<MessageData['intent']>>) => void;
+  onWorkflowAction: (id: string, action: string, data?: unknown) => void;
   onRunCommand?: (command: string) => void;
 }
 
-export default function Message({ msg, onConfirm, onCancel, onUpdateIntent, onRunCommand }: MessageProps) {
+export default function Message({ msg, onConfirm, onCancel, onUpdateIntent, onWorkflowAction, onRunCommand }: MessageProps) {
   const isUser = msg.role === 'user';
   const [copied, setCopied] = useState(false);
   const [copiedAddress, setCopiedAddress] = useState<string | null>(null);
@@ -185,6 +187,17 @@ export default function Message({ msg, onConfirm, onCancel, onUpdateIntent, onRu
               derivedAddresses={msg.derivedAddresses}
               status={msg.status}
               onChange={(patch) => onUpdateIntent(msg.id, patch)}
+            />
+          </div>
+        )}
+
+        {!isUser && msg.workflowConfig && (
+          <div className="w-full">
+            <WorkflowPanel
+              config={msg.workflowConfig}
+              contractAddress={msg.contractAddress}
+              deploymentTxHash={msg.txHash}
+              onAction={(action, data) => onWorkflowAction(msg.id, action, data)}
             />
           </div>
         )}

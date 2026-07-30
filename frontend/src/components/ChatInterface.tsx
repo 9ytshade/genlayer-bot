@@ -7,8 +7,22 @@ import CommandPalette from './CommandPalette';
 import ConnectWalletButton from './ConnectWalletButton';
 import LiveLogsPanel from './LiveLogsPanel';
 import GenLayerLogo from './GenLayerLogo';
+import { WorkflowEngine } from '@/services/WorkflowEngine';
 import type { Intent } from '../lib/api';
-import { MessageData, sendMessage, confirmAction, buildTransferTx, buildDeployTx, validateContractFile, getChatHistory, saveChatHistory, getStoredAuthToken, generateContract } from '../lib/api';
+import {
+  MessageData,
+  sendMessage,
+  confirmAction,
+  buildTransferTx,
+  buildDeployTx,
+  buildWorkflowDeployTx,
+  buildContractCallTx,
+  validateContractFile,
+  getChatHistory,
+  saveChatHistory,
+  getStoredAuthToken,
+  generateContract,
+} from '../lib/api';
 import { SendHorizontal, Bot, Loader2, Command, FileUp, Plus, MessageSquare, History, Activity, X, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useWallet } from '@/context/WalletContext';
@@ -24,7 +38,7 @@ interface ChatSession {
 }
 
 const STORAGE_KEY_PREFIX = 'genlayer-chat-history';
-const WELCOME_MESSAGE = "Hi! I'm your GenLayer AI assistant. You can ask me to check your balance, send tokens, or deploy intelligent contracts. What would you like to do?";
+const WELCOME_MESSAGE = "Hi! I'm your GenLayer AI assistant. You can check balances, send tokens, deploy contracts, or launch workflow contracts for conditional payments, escrow, subscriptions, and bounties. What would you like to do?";
 const HELP_MESSAGE = `Available commands:
 
 help - Show this command list.
@@ -32,6 +46,15 @@ check balance - Check the connected wallet balance on the selected GenLayer netw
 send tokens - Prepare a wallet-side GEN transfer. Example: Send 10 GEN to 0x...
 deploy contract - Start contract deployment. I will ask you to upload a .py GenLayer Intelligent Contract file.
 generate contract - Describe a contract in plain English and the AI will write and deploy it for you.
+
+WORKFLOW COMMANDS (require wallet addresses, not names):
+conditional payment - Pay when a condition is met. Example: "Pay 100 GEN to 0x... if ETH reaches 10000"
+escrow - Secure payment between two parties. Example: "Create escrow for 500 GEN between 0x... and 0x..."
+subscription - Recurring payments. Example: "Send 50 GEN weekly to 0x..."
+bounty - Reward for work. Example: "Create 1000 GEN bounty for landing page"
+
+NOTE: All wallet transfers require Ethereum addresses (0x followed by 40 hex characters). Names are not supported.
+
 new chat - Start a clean chat session from the left sidebar.
 switch network - Use the network selector to switch between Studionet and Bradbury.`;
 const HELP_COMMANDS: NonNullable<MessageData['helpCommands']> = [
@@ -54,6 +77,26 @@ const HELP_COMMANDS: NonNullable<MessageData['helpCommands']> = [
     label: 'Generate Contract',
     command: 'Generate contract: ',
     description: 'Describe a contract and the AI will write, validate, and deploy it for you.',
+  },
+  {
+    label: 'Conditional Payment',
+    command: 'Pay 100 GEN to 0x',
+    description: 'Send payment when a specified condition is met. Requires recipient wallet address.',
+  },
+  {
+    label: 'Escrow',
+    command: 'Create escrow for 500 GEN between 0x',
+    description: 'Secure payment between two parties with dispute resolution. Requires buyer and seller addresses.',
+  },
+  {
+    label: 'Subscription',
+    command: 'Send 50 GEN weekly to 0x',
+    description: 'Set up recurring payments at specified intervals. Requires recipient wallet address.',
+  },
+  {
+    label: 'Bounty',
+    command: 'Create 1000 GEN bounty for ',
+    description: 'Offer a reward for completing a task or challenge.',
   },
   {
     label: 'New Chat',
@@ -157,6 +200,26 @@ function normalizeDeployIntentForUi(intent: Intent, fileName?: string): Intent {
     gas_limit_text: intent.gas_limit_text || (intent.gas_limit ? String(intent.gas_limit) : ''),
     consensus_max_rotations_text:
       intent.consensus_max_rotations_text || (intent.consensus_max_rotations ? String(intent.consensus_max_rotations) : ''),
+  };
+}
+
+function buildWorkflowGeneratedContract(workflowConfig: NonNullable<MessageData['workflowConfig']>): NonNullable<MessageData['generatedContract']> {
+  const contractName = WorkflowEngine.getContractName(workflowConfig);
+  const code = WorkflowEngine.generateContractCode(workflowConfig);
+  return {
+    contractName,
+    contractType: workflowConfig.workflowType,
+    explanation: `Predefined ${workflowConfig.workflowType.replace(/_/g, ' ')} template configured from your request. You can copy/download this Python contract or deploy it directly.`,
+    code,
+    fileName: `${contractName}.py`,
+    specification: workflowConfig as unknown as Record<string, unknown>,
+    validation: {
+      valid: true,
+      message: 'Workflow contract template selected and configured.',
+      errors: [],
+      warnings: [],
+      contract_names: [contractName],
+    },
   };
 }
 
@@ -696,18 +759,67 @@ export default function ChatInterface() {
       return;
     }
 
+    const workflowParse = WorkflowEngine.parseNaturalLanguage(trimmedInput, connectedWallet);
+    if (workflowParse.config && workflowParse.intent) {
+      if (workflowParse.errors.length > 0) {
+        appendMessagesToCurrentChat({
+          id: (Date.now() + 1).toString(),
+          role: 'bot',
+          content: `I detected a ${workflowParse.config.workflowType.replace(/_/g, ' ')} workflow, but it needs a little cleanup before deployment:\n\n${workflowParse.errors.join('\n')}`,
+          intent: workflowParse.intent,
+          workflowConfig: workflowParse.config,
+          status: 'error',
+        });
+        return;
+      }
+
+      const summary = WorkflowEngine.getWorkflowSummary(workflowParse.config);
+      appendMessagesToCurrentChat({
+        id: (Date.now() + 1).toString(),
+        role: 'bot',
+        content: `Workflow ready for deployment.\n\n${summary}\n\nI selected the predefined ${WorkflowEngine.getContractName(workflowParse.config)} template and configured it from your request. Confirm to deploy it through your wallet.`,
+        intent: workflowParse.intent,
+        workflowConfig: workflowParse.config,
+        generatedContract: buildWorkflowGeneratedContract(workflowParse.config),
+        status: 'awaiting_confirmation',
+      });
+      return;
+    }
+
     setIsLoading(true);
 
     try {
       const response = await sendMessage(userMsg.content, connectedWallet ?? undefined, selectedNetwork);
+      
+      // Check if this is a workflow intent
+      const isWorkflowIntent = response.intent && WorkflowEngine.detectWorkflow(response.intent);
+      const workflowStatus = isWorkflowIntent ? 'awaiting_confirmation' : response.status;
+      
+      // If it's a workflow intent, build and validate the configuration
+      let workflowContent = response.content || 'An error occurred.';
+      let workflowConfig: MessageData['workflowConfig'] | undefined = undefined;
+      if (isWorkflowIntent && response.intent) {
+        workflowConfig = WorkflowEngine.buildWorkflowConfig(response.intent) || undefined;
+        if (workflowConfig) {
+          const validation = WorkflowEngine.validateConfig(workflowConfig);
+          if (validation.valid) {
+            const summary = WorkflowEngine.getWorkflowSummary(workflowConfig);
+            workflowContent = `${response.content || 'Workflow ready for deployment'}\n\n${summary}`;
+          } else {
+            workflowContent = `Configuration error: ${validation.errors.join(', ')}`;
+          }
+        }
+      }
+      
       const botMsg: MessageData = {
         id: (Date.now() + 1).toString(),
         role: 'bot',
-        content: response.content || 'An error occurred.',
+        content: workflowContent,
         intent: response.intent,
-        generatedContract: response.generatedContract,
+        workflowConfig: workflowConfig || undefined,
+        generatedContract: workflowConfig ? buildWorkflowGeneratedContract(workflowConfig) : response.generatedContract,
         simulation: response.simulation,
-        status: response.status
+        status: workflowStatus
       };
       appendMessagesToCurrentChat(botMsg);
     } catch (error) {
@@ -743,8 +855,65 @@ export default function ChatInterface() {
       let intentForConfirmation = intent;
       let txHash: string | undefined = undefined;
 
-      // For transfers and deployments, let the user's wallet broadcast the transaction.
-      if (intent.action === 'transfer') {
+      const workflowType = WorkflowEngine.detectWorkflow(intent);
+      if (workflowType) {
+        const workflowConfig = msg.workflowConfig || WorkflowEngine.buildWorkflowConfig(intent);
+        if (!workflowConfig) {
+          throw new Error(`Failed to build workflow configuration for ${workflowType}`);
+        }
+
+        const validation = WorkflowEngine.validateConfig(workflowConfig);
+        if (!validation.valid) {
+          throw new Error(`Workflow validation failed: ${validation.errors.join(', ')}`);
+        }
+
+        const txData = await buildWorkflowDeployTx(
+          {
+            workflow_config: workflowConfig,
+            deploy_value_wei: '0',
+            gas_limit: null,
+            consensus_max_rotations: null,
+            leader_only: false,
+          },
+          connectedWallet as string,
+          selectedNetwork
+        );
+
+        const deployIntent: Intent = {
+          action: 'deploy_contract',
+          code: txData.code,
+          contract_name: txData.contractName,
+          contract_type: txData.workflowConfig.workflowType,
+          constructor_args: txData.constructorArgs,
+          constructor_kwargs: txData.constructorKwargs,
+          deploy_value: 0,
+          constructor_args_text: JSON.stringify(txData.constructorArgs, null, 2),
+          constructor_kwargs_text: '{}',
+          deploy_value_text: '0',
+          source_file_name: `${txData.contractName}.py`,
+          gas_limit: null,
+          gas_limit_text: '',
+          consensus_max_rotations: null,
+          consensus_max_rotations_text: '',
+          leader_only: false,
+          workflow_config: txData.workflowConfig,
+        };
+
+        txHash = await sendTransaction({
+          to: txData.to,
+          data: txData.data,
+          value: txData.value,
+          chainId: txData.chainId,
+          nonce: txData.nonce,
+          gas: txData.gas,
+          gasPrice: txData.gasPrice,
+          maxFeePerGas: txData.maxFeePerGas,
+          maxPriorityFeePerGas: txData.maxPriorityFeePerGas,
+        });
+
+        intentForConfirmation = deployIntent;
+      } else if (intent.action === 'transfer') {
+        // For transfers and deployments, let the user's wallet broadcast the transaction.
         if (!intent.recipient || typeof intent.amount !== 'number') {
           throw new Error('Transfer intent is missing recipient or amount.');
         }
@@ -811,6 +980,141 @@ export default function ChatInterface() {
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Network error during execution.';
       replaceMessageInCurrentChat(msgId, (message) => ({ ...message, status: 'error', content: errorMessage }));
+    }
+  };
+
+  const handleWorkflowAction = async (msgId: string, action: string) => {
+    const msg = messages.find(m => m.id === msgId);
+    if (!msg?.workflowConfig || !msg.contractAddress) {
+      return;
+    }
+
+    if (!connectedWallet) {
+      appendMessagesToCurrentChat({
+        id: Date.now().toString(),
+        role: 'bot',
+        content: 'Wallet not connected',
+        status: 'error',
+      });
+      return;
+    }
+
+    const methodMap: Record<string, { method: string; nextStatus?: string; promptLabel?: string }> = {
+      cancel_contract: { method: 'cancel_contract', nextStatus: 'cancelled' },
+      view_details: { method: 'status' },
+      approve_release: { method: 'approve_release', nextStatus: 'completed' },
+      raise_dispute: { method: 'raise_dispute', nextStatus: 'disputed' },
+      cancel_escrow: { method: 'cancel_escrow', nextStatus: 'cancelled' },
+      pause: { method: 'pause', nextStatus: 'paused' },
+      resume: { method: 'resume', nextStatus: 'active' },
+      cancel_subscription: { method: 'cancel', nextStatus: 'cancelled' },
+      record_payment: { method: 'record_payment', nextStatus: 'active' },
+      review_submission: { method: 'review_submission', promptLabel: 'Submitter wallet address' },
+      select_winner: { method: 'select_winner', nextStatus: 'completed', promptLabel: 'Winner wallet address' },
+      close_bounty: { method: 'close_bounty', nextStatus: 'completed' },
+    };
+    const actionConfig = methodMap[action];
+    if (!actionConfig) {
+      appendMessagesToCurrentChat({
+        id: Date.now().toString(),
+        role: 'bot',
+        content: `Unsupported workflow action: ${action}`,
+        status: 'error',
+      });
+      return;
+    }
+
+    if (actionConfig.method === 'status') {
+      appendMessagesToCurrentChat({
+        id: Date.now().toString(),
+        role: 'bot',
+        content: `Workflow contract: ${msg.contractAddress}`,
+        status: 'success',
+      });
+      return;
+    }
+
+    const args: unknown[] = [];
+    if (actionConfig.promptLabel) {
+      const value = window.prompt(actionConfig.promptLabel);
+      if (!value) {
+        return;
+      }
+      args.push(value.trim());
+    }
+
+    const actionMessageId = Date.now().toString();
+    appendMessagesToCurrentChat({
+      id: actionMessageId,
+      role: 'bot',
+      content: `Preparing workflow action '${actionConfig.method}' for wallet signature.`,
+      intent: {
+        action: 'contract_call',
+        contract_address: msg.contractAddress,
+        method: actionConfig.method,
+        args,
+        kwargs: {},
+        workflow_type: msg.workflowConfig.workflowType,
+        next_status: actionConfig.nextStatus,
+      },
+      status: 'executing',
+    });
+
+    try {
+      const txData = await buildContractCallTx(
+        {
+          contract_address: msg.contractAddress,
+          method: actionConfig.method,
+          args,
+          kwargs: {},
+          value_wei: '0',
+          workflow_type: msg.workflowConfig.workflowType,
+        },
+        connectedWallet as string,
+        selectedNetwork
+      );
+      const txHash = await sendTransaction({
+        to: txData.to,
+        data: txData.data,
+        value: txData.value,
+        chainId: txData.chainId,
+        nonce: txData.nonce,
+        gas: txData.gas,
+        gasPrice: txData.gasPrice,
+        maxFeePerGas: txData.maxFeePerGas,
+        maxPriorityFeePerGas: txData.maxPriorityFeePerGas,
+      });
+
+      const intent: Intent = {
+        action: 'contract_call',
+        contract_address: msg.contractAddress,
+        method: actionConfig.method,
+        args,
+        kwargs: {},
+        workflow_type: msg.workflowConfig.workflowType,
+        next_status: actionConfig.nextStatus,
+      };
+      const result = await confirmAction(intent, connectedWallet, undefined, txHash, selectedNetwork);
+      if (!result.error) {
+        refreshBalance();
+      }
+      replaceMessageInCurrentChat(actionMessageId, (message) => ({
+        ...message,
+        status: result.error ? 'error' : 'success',
+        intent,
+        txHash: result.txHash,
+        consensusTxId: result.consensusTxId,
+        content: result.error
+          ? `Workflow action failed: ${result.error}`
+          : result.content || `Workflow action '${actionConfig.method}' submitted to GenLayer.`,
+      }));
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Workflow action failed.';
+      replaceMessageInCurrentChat(actionMessageId, (message) => ({
+        ...message,
+        status: 'error',
+        content: errorMessage,
+      }));
     }
   };
 
@@ -1087,6 +1391,7 @@ export default function ChatInterface() {
               onConfirm={handleConfirm}
               onCancel={handleCancel}
               onUpdateIntent={handleIntentUpdate}
+              onWorkflowAction={handleWorkflowAction}
               onRunCommand={handleQuickAction}
             />
           ))}

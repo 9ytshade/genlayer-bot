@@ -4,7 +4,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useWallet } from '../context/WalletContext';
 import { Wallet, LogOut, Copy, Check, AlertCircle, Loader2 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { getPlatformWallet, getWalletBalance } from '../lib/api';
+import { getWalletBalance } from '../lib/api';
 import type { NetworkKey } from '@/config';
 
 interface ConnectWalletButtonProps {
@@ -18,7 +18,6 @@ export default function ConnectWalletButton({ network }: ConnectWalletButtonProp
   const [balance, setBalance] = useState<number | null>(null);
   const [isBalanceLoading, setIsBalanceLoading] = useState(false);
   const [balanceError, setBalanceError] = useState<string | null>(null);
-  const [hasPlatformWallet, setHasPlatformWallet] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -67,24 +66,6 @@ export default function ConnectWalletButton({ network }: ConnectWalletButtonProp
 
     fetchBalance();
   }, [account, isConnected, network, balanceRefreshNonce]);
-
-  useEffect(() => {
-    const fetchPlatformWallet = async () => {
-      if (!account || !isConnected) {
-        setHasPlatformWallet(false);
-        return;
-      }
-
-      try {
-        const platformWallet = await getPlatformWallet(account);
-        setHasPlatformWallet(Boolean(platformWallet));
-      } catch {
-        setHasPlatformWallet(false);
-      }
-    };
-
-    fetchPlatformWallet();
-  }, [account, isConnected]);
 
   if (isConnecting) {
     return (
@@ -161,12 +142,6 @@ export default function ConnectWalletButton({ network }: ConnectWalletButtonProp
                 )}
               </div>
             </div>
-
-            {hasPlatformWallet && (
-              <div className="border-b border-border-subtle bg-accent-warning/10 px-3 py-2 font-mono text-[10px] leading-relaxed text-accent-warning">
-                This is a server-managed wallet. Do not deposit funds you cannot afford to lose. Private keys are stored encrypted on the server.
-              </div>
-            )}
 
             <div className="p-1 flex flex-col">
               <button
