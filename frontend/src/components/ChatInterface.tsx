@@ -2,11 +2,8 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import MessageComponent from './Message';
-import QuickActions from './QuickActions';
 import CommandPalette from './CommandPalette';
-import ConnectWalletButton from './ConnectWalletButton';
 import LiveLogsPanel from './LiveLogsPanel';
-import GenLayerLogo from './GenLayerLogo';
 import { WorkflowEngine } from '@/services/WorkflowEngine';
 import type { Intent } from '../lib/api';
 import {
@@ -23,19 +20,16 @@ import {
   getStoredAuthToken,
   generateContract,
 } from '../lib/api';
-import { SendHorizontal, Bot, Loader2, Command, FileUp, Plus, MessageSquare, History, Activity, X, Trash2 } from 'lucide-react';
+import { Bot, X } from 'lucide-react';
+import ChatHeader from './ChatHeader';
+import ChatInput from './ChatInput';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useWallet } from '@/context/WalletContext';
 import { useChainId } from 'wagmi';
 import { DEFAULT_NETWORK, NETWORK_CONFIG, type NetworkKey } from '@/config';
 import { parseEther } from 'viem';
 
-interface ChatSession {
-  id: string;
-  title: string;
-  updatedAt: number;
-  messages: MessageData[];
-}
+import ChatSidebar, { type ChatSession } from './ChatSidebar';
 
 const STORAGE_KEY_PREFIX = 'genlayer-chat-history';
 const WELCOME_MESSAGE = "Hi! I'm your GenLayer AI assistant. You can check balances, send tokens, deploy contracts, or launch workflow contracts for conditional payments, escrow, subscriptions, and bounties. What would you like to do?";
@@ -1207,162 +1201,28 @@ export default function ChatInterface() {
   if (!isMounted) return null;
 
   const historyPanel = (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="shrink-0 border-b border-border-default px-4 py-4 sm:px-5">
-        <div className="mb-4 flex items-center justify-center rounded-[10px] border border-border-subtle bg-bg-base/60 p-3 text-center">
-          <div className="min-w-0">
-            <GenLayerLogo className="mx-auto h-5 w-32 text-text-primary" />
-            <div className="micro-label mt-1 text-center">Wallet-scoped workspace</div>
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={() => {
-            handleCreateNewChat();
-            setActivePanel('chat');
-          }}
-          disabled={!connectedWallet || isLoading}
-          className="primary-action flex h-10 w-full items-center justify-center gap-2 rounded-[8px] px-4 font-mono text-[11px] font-bold"
-          title="Start new chat"
-        >
-          <Plus size={13} />
-          New Chat
-        </button>
-      </div>
-
-      <div className="shrink-0 border-b border-border-default px-4 py-4 sm:px-5">
-        <div className="mb-2 flex items-center justify-between">
-          <span className="micro-label">Connected</span>
-          <span className={`h-2 w-2 rounded-full ${connectedWallet ? 'bg-accent-success' : 'bg-accent-danger'}`} />
-        </div>
-        <div className="rounded-[10px] border border-border-subtle bg-bg-base/55 p-3">
-          <div className="truncate font-mono text-[11px] font-semibold text-text-primary">
-            {connectedWallet ? `${connectedWallet.slice(0, 6)}...${connectedWallet.slice(-4)}` : 'No wallet'}
-          </div>
-          <div className="mt-1 font-mono text-[9px] uppercase tracking-[0.08em] text-text-muted">
-            {connectedWallet ? `${NETWORK_CONFIG[selectedNetwork].label} - sync active` : 'Connect to load chats'}
-          </div>
-          <div className="mt-3">
-            <ConnectWalletButton network={selectedNetwork} />
-          </div>
-        </div>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">
-        <div className="micro-label mb-3">Chats</div>
-        {connectedWallet ? (
-          <div className="space-y-2">
-            {chats.map((chat) => (
-              <div
-                key={chat.id}
-                className={`group flex items-start gap-2 rounded-[10px] border p-3 transition-colors ${
-                  chat.id === currentChatId
-                    ? 'border-accent-primary/55 bg-accent-primary/10 text-text-primary'
-                    : 'border-border-subtle bg-bg-base/35 text-text-secondary hover:border-border-strong hover:bg-bg-base'
-                }`}
-              >
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleSelectChat(chat.id);
-                    setActivePanel('chat');
-                  }}
-                  className="min-w-0 flex-1 text-left"
-                  title={chat.title}
-                >
-                  <div className="flex items-center gap-2">
-                  <MessageSquare size={13} className="shrink-0 text-text-muted group-hover:text-accent-primary" />
-                  <span className="min-w-0 flex-1 truncate font-mono text-[11px] font-semibold">
-                    {chat.title}
-                  </span>
-                  </div>
-                  <div className="mt-1 truncate pl-5 font-mono text-[9px] uppercase tracking-[0.06em] text-text-muted">
-                  {chat.messages.length} messages - today
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleDeleteChat(chat.id)}
-                  className="control-button flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] opacity-70 transition-opacity hover:opacity-100"
-                  title="Delete chat"
-                >
-                  <Trash2 size={12} />
-                </button>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="rounded-[10px] border border-border-subtle bg-bg-base/35 p-3 text-[11px] leading-relaxed text-text-muted">
-            Connect a wallet to load synced chats, sign SIWE, and deploy.
-          </div>
-        )}
-      </div>
-    </div>
+    <ChatSidebar
+      chats={chats}
+      currentChatId={currentChatId}
+      connectedWallet={connectedWallet}
+      selectedNetwork={selectedNetwork}
+      isLoading={isLoading}
+      onSelectChat={handleSelectChat}
+      onDeleteChat={handleDeleteChat}
+      onCreateNewChat={handleCreateNewChat}
+      onSetActivePanel={setActivePanel}
+    />
   );
 
   const chatPanel = (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="shrink-0 border-b border-border-default bg-bg-base/80 px-4 py-3 backdrop-blur sm:px-6 sm:py-4 xl:px-8">
-        <div className="mb-3 flex min-h-9 items-start justify-between gap-3 lg:justify-start">
-          <button
-            type="button"
-            onClick={() => setActivePanel('history')}
-            className="control-button flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] lg:hidden"
-            title="Open chat history"
-          >
-            <History size={13} />
-          </button>
-
-          <div className="min-w-0 flex-1">
-            <div className="micro-label mb-1">Intelligent Contract Workbench</div>
-            <h1 className="truncate font-display text-[17px] font-semibold leading-tight text-text-primary sm:text-[20px]">
-              GenLayer Chatbot
-            </h1>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <span className="status-pill border-accent-success/45 bg-accent-success/5 text-accent-success">
-                {NETWORK_CONFIG[selectedNetwork].label}
-              </span>
-              {connectedWallet && (
-                <span className="status-pill text-text-secondary">
-                  {connectedWallet.slice(0, 6)}...{connectedWallet.slice(-4)}
-                </span>
-              )}
-            </div>
-          </div>
-
-          <div className="hidden shrink-0 items-center gap-2 lg:flex">
-            <label htmlFor="network-select" className="micro-label">
-              Network
-            </label>
-            <select
-              id="network-select"
-              value={selectedNetwork}
-              onChange={(e) => {
-                void handleNetworkChange(e.target.value as NetworkKey);
-              }}
-              className="field-input rounded-full px-3 py-2 font-mono text-[10px] text-text-secondary"
-            >
-              {Object.entries(NETWORK_CONFIG).map(([key, cfg]) => (
-                <option key={key} value={key}>
-                  {cfg.label}
-                </option>
-              ))}
-            </select>
-            <ConnectWalletButton network={selectedNetwork} />
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setActivePanel('logs')}
-            className="control-button flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] lg:hidden"
-            title="Open activity logs"
-          >
-            <Activity size={13} />
-          </button>
-        </div>
-
-        <QuickActions onSelectAction={handleQuickAction} />
-      </div>
+      <ChatHeader
+        selectedNetwork={selectedNetwork}
+        connectedWallet={connectedWallet}
+        handleNetworkChange={handleNetworkChange}
+        setActivePanel={setActivePanel}
+        handleQuickAction={handleQuickAction}
+      />
 
       <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain px-4 py-5 scroll-smooth sm:px-6 sm:py-6 xl:px-8">
         {!connectedWallet && (
@@ -1420,70 +1280,20 @@ export default function ChatInterface() {
         <div ref={messagesEndRef} className="h-3" />
       </div>
 
-      <div className="shrink-0 border-t border-border-default bg-bg-base/95 px-3 pb-16 pt-3 sm:px-5 lg:px-6 lg:pb-3">
-        <form onSubmit={handleSubmit} className="panel-soft relative mx-auto flex w-full items-center gap-1.5 rounded-[12px] p-1.5 shadow-[0_18px_50px_rgba(0,0,0,0.24)] sm:gap-2">
-          <button
-            type="button"
-            onClick={() => setCommandPaletteOpen(true)}
-            disabled={!connectedWallet}
-            className="control-button hidden h-9 w-9 items-center justify-center rounded-[9px] bg-accent-cyan/8 text-accent-cyan sm:flex"
-            title={connectedWallet ? "Open command palette (Cmd+K)" : "Connect wallet first"}
-          >
-            <Command size={14} />
-          </button>
-
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleFileUpload}
-            accept=".py"
-            aria-label="Upload Python contract file"
-            className="hidden"
-          />
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={!connectedWallet || isLoading}
-            className="control-button flex h-9 w-9 items-center justify-center rounded-[9px] bg-accent-primary/8 text-accent-primary"
-            title="Upload Intelligent Contract (.py)"
-          >
-            <FileUp size={14} />
-          </button>
-
-          <input
-            type="text"
-            aria-label="Chat message"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-                e.preventDefault();
-                setCommandPaletteOpen(true);
-              }
-            }}
-            placeholder={connectedWallet ? "Ask GenLayer Bot to check balance, send GEN, generate, validate, or deploy a contract..." : "Connect wallet to chat..."}
-            className="min-h-9 flex-1 border-none bg-transparent px-2 font-mono text-[11px] text-text-primary placeholder:text-text-muted focus:outline-none sm:px-3 sm:text-[12px]"
-            disabled={!connectedWallet || isLoading || messages.some(m => m.status === 'awaiting_confirmation' || m.status === 'executing')}
-          />
-          <button
-            type="submit"
-            disabled={!connectedWallet || !input.trim() || isLoading || isNetworkMismatch || messages.some(m => m.status === 'awaiting_confirmation' || m.status === 'executing')}
-            className="primary-action flex h-9 w-9 items-center justify-center rounded-[9px] disabled:opacity-50"
-            title={!connectedWallet ? "Connect wallet to send messages" : isNetworkMismatch ? `Switch wallet to ${NETWORK_CONFIG[selectedNetwork].label}` : ""}
-          >
-            {isLoading ? (
-              <Loader2 size={14} className="animate-spin" />
-            ) : (
-              <SendHorizontal size={15} />
-            )}
-          </button>
-        </form>
-        {uploadError && (
-          <div className="mt-2 rounded-[8px] border border-accent-danger bg-accent-danger/10 px-3 py-2 text-[10px] text-accent-danger">
-            {uploadError}
-          </div>
-        )}
-      </div>
+      <ChatInput
+        input={input}
+        setInput={setInput}
+        handleSubmit={handleSubmit}
+        setCommandPaletteOpen={setCommandPaletteOpen}
+        connectedWallet={connectedWallet}
+        isLoading={isLoading}
+        isNetworkMismatch={isNetworkMismatch}
+        selectedNetwork={selectedNetwork}
+        messages={messages}
+        fileInputRef={fileInputRef}
+        handleFileUpload={handleFileUpload}
+        uploadError={uploadError}
+      />
     </div>
   );
 

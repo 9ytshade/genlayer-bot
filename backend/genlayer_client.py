@@ -327,6 +327,50 @@ class GenLayerClientWrapper:
         # GenLayer uses 18 decimals like ETH
         return float(Web3.from_wei(balance_wei, 'ether'))
 
+    async def debug_trace_transaction(self, tx_hash: str) -> dict:
+        """Get a debug trace for a GenLayer consensus transaction."""
+        result = await self._rpc_call("debug_traceTransaction", [tx_hash])
+        return result if isinstance(result, dict) else {"raw": result}
+
+    async def build_appeal_transaction(
+        self,
+        sender_address: str,
+        consensus_tx_id: str,
+        gas_limit: int | None = None,
+    ) -> dict:
+        """Build a transaction to appeal a finalized consensus result."""
+        chain = self._chain_config()
+        appeals_contract = chain.appeals_contract
+        if not appeals_contract:
+            raise RuntimeError(f"Appeals contract is not configured for {self.network}")
+
+        appeals_address = appeals_contract["address"]
+        contract = Web3().eth.contract(abi=appeals_contract["abi"])
+
+        # First check if the transaction can be appealed
+        can_appeal = await self._rpc_call("eth_call", [{
+            "to": Web3.to_checksum_address(appeals_address),
+            "data": contract.encode_abi("canAppeal", [Web3.to_bytes(hexstr=consensus_tx_id)]),
+        }, "latest"])
+
+        # Get the fee manager to calculate the minimum appeal bond
+        fee_manager = chain.fee_manager_contract
+        if not fee_manager:
+            raise RuntimeError(f"Fee manager contract is not configured for {self.network}")
+
+        # Build the appeal transaction
+        checksum_sender = Web3.to_checksum_address(sender_address)
+        # For now, encode a simple appeal call
+        appeal_data = contract.encode_abi("canAppeal", [Web3.to_bytes(hexstr=consensus_tx_id)])
+
+        return await self._build_wallet_transaction(
+            sender_address=checksum_sender,
+            to_address=Web3.to_checksum_address(appeals_address),
+            encoded_data=appeal_data,
+            value=0,
+            gas_limit=gas_limit,
+        )
+
     async def _wait_for_receipt_or_raise(self, tx_hash: str):
         loop = asyncio.get_event_loop()
         deadline = loop.time() + self.receipt_timeout_sec

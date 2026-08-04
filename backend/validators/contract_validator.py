@@ -35,16 +35,26 @@ class ContractValidator:
         class_defs = [node for node in tree.body if isinstance(node, ast.ClassDef)]
         has_contract_base = any(
             any(
-                isinstance(base_node, ast.Attribute)
-                and base_node.attr == "Contract"
-                and isinstance(base_node.value, ast.Attribute)
-                and base_node.value.attr == "contract"
+                (
+                    # New pattern: gl.Contract
+                    isinstance(base_node, ast.Attribute)
+                    and base_node.attr == "Contract"
+                    and isinstance(base_node.value, ast.Name)
+                    and base_node.value.id == "gl"
+                )
+                or (
+                    # Legacy pattern: gl.contract.Contract
+                    isinstance(base_node, ast.Attribute)
+                    and base_node.attr == "Contract"
+                    and isinstance(base_node.value, ast.Attribute)
+                    and base_node.value.attr == "contract"
+                )
                 for base_node in class_def.bases
             )
             for class_def in class_defs
         )
         if not has_contract_base:
-            errors.append("Generated contract must inherit from gl.contract.Contract.")
+            errors.append("Generated contract must inherit from gl.Contract.")
 
         has_public_method = any(
             any(

@@ -36,7 +36,9 @@ check balance - Check the connected wallet balance on the selected GenLayer netw
 send tokens - Prepare a wallet-side GEN transfer. Example: Send 10 GEN to 0x...
 deploy contract - Start contract deployment. Upload a .py GenLayer Intelligent Contract file when prompted.
 new chat - Start a clean chat session from the left sidebar.
-switch network - Use the network selector to switch between Studionet and Bradbury."""
+switch network - Use the network selector to switch between Studionet and Bradbury.
+debug tx - Debug a transaction. Example: debug tx 0x...
+appeal tx - Appeal a consensus transaction result. Example: appeal tx 0x..."""
 
 contract_generation_service = ContractGenerationService()
 
@@ -474,6 +476,40 @@ async def handle_chat(request: Request, chat_request: ChatRequest):
             "status": "awaiting_confirmation",
         }
 
+    if intent["action"] == "debug_trace":
+        tx_hash = intent.get("tx_hash")
+        if not tx_hash:
+            return {
+                "content": "Please provide a transaction hash to debug. Example: debug tx 0x...",
+                "intent": intent,
+                "status": "awaiting_input",
+            }
+        try:
+            client = get_client(network=network)
+            trace = await client.debug_trace_transaction(tx_hash)
+            trace_summary = json.dumps(trace, indent=2, default=str)[:3000]
+            await logs_store.append("SUCCESS", "DEBUG_TRACE_SUCCESS", "Debug trace retrieved.", {"txHash": tx_hash})
+            return {
+                "content": f"Debug trace for `{tx_hash}`:\n\n```json\n{trace_summary}\n```",
+                "intent": intent,
+                "status": "success",
+            }
+        except Exception as e:
+            await logs_store.append("ERROR", "DEBUG_TRACE_FAILED", "Debug trace failed.", {"error": str(e)})
+            return {
+                "content": f"Failed to get debug trace: {str(e)}",
+                "intent": intent,
+                "status": "error",
+            }
+
+    if intent["action"] == "appeal_transaction":
+        await logs_store.append("INFO", "AWAIT_CONFIRMATION", "Awaiting confirmation for transaction appeal.")
+        return {
+            "content": f"I can prepare an appeal for transaction `{intent.get('tx_hash', 'unknown')}`. This will require posting an appeal bond. Do you want to proceed?",
+            "intent": intent,
+            "status": "awaiting_confirmation",
+        }
+
     if intent["action"] == "deploy_contract":
         if not intent.get("code"):
             return {
@@ -603,6 +639,22 @@ async def confirm_action(
         except Exception as e:
             await logs_store.append("ERROR", "CONTRACT_CALL_FAILED", "Contract call failed.", {"error": str(e), "intent": intent})
             raise HTTPException(status_code=502, detail=f"Contract call failed: {str(e)}")
+
+    if intent["action"] == "appeal_transaction":
+        if not request.signed_transaction and not request.tx_hash:
+            raise HTTPException(status_code=400, detail="Appeal requires tx_hash or signed_transaction from user wallet")
+        try:
+            client = get_client(network=network)
+            tx_hash = request.tx_hash or await client._rpc_call("eth_sendRawTransaction", [request.signed_transaction])
+            await client._wait_for_receipt_or_raise(tx_hash)
+            await logs_store.append("SUCCESS", "APPEAL_SUCCESS", "Appeal transaction submitted.", {"txHash": tx_hash})
+            return {
+                "txHash": tx_hash,
+                "content": "Appeal transaction submitted to GenLayer network.",
+            }
+        except Exception as e:
+            await logs_store.append("ERROR", "APPEAL_FAILED", "Appeal failed.", {"error": str(e), "intent": intent})
+            raise HTTPException(status_code=502, detail=f"Appeal failed: {str(e)}")
 
     await logs_store.append("ERROR", "UNSUPPORTED_ACTION", "Unsupported action during confirmation.", {"intent": intent})
     raise HTTPException(status_code=400, detail="Unsupported action for execution")

@@ -189,13 +189,13 @@ def validate_workflow_action(workflow_type: str, method: str, args: list[Any]) -
             raise WorkflowValidationError("Workflow action contains an invalid address argument.")
 
 
-HEADER = """import genlayer as gl
-from genlayer.types import *
+HEADER = """# { "Depends": "py-genlayer:test" }
+from genlayer import *
 """
 
 CONDITIONAL_PAYMENT_TEMPLATE = f"""{HEADER}
 
-class ConditionalPaymentContract(gl.contract.Contract):
+class ConditionalPaymentContract(gl.Contract):
     payer: Address
     recipient: Address
     amount: u256
@@ -216,16 +216,16 @@ class ConditionalPaymentContract(gl.contract.Contract):
     @gl.public.write
     def mark_condition_satisfied(self):
         if self.cancelled:
-            gl.vm.UserError.immediate("Conditional payment is cancelled")
+            raise gl.vm.UserError("Conditional payment is cancelled")
         if self.executed:
-            gl.vm.UserError.immediate("Conditional payment already executed")
+            raise gl.vm.UserError("Conditional payment already executed")
         self.executed = True
         return "Condition satisfied. Payment workflow marked executed."
 
     @gl.public.write
     def cancel_contract(self):
         if self.executed:
-            gl.vm.UserError.immediate("Executed conditional payment cannot be cancelled")
+            raise gl.vm.UserError("Executed conditional payment cannot be cancelled")
         self.cancelled = True
         return "Conditional payment cancelled"
 
@@ -236,7 +236,7 @@ class ConditionalPaymentContract(gl.contract.Contract):
 
 ESCROW_TEMPLATE = f"""{HEADER}
 
-class EscrowContract(gl.contract.Contract):
+class EscrowContract(gl.Contract):
     buyer: Address
     seller: Address
     amount: u256
@@ -259,21 +259,21 @@ class EscrowContract(gl.contract.Contract):
     @gl.public.write
     def approve_release(self):
         if self.cancelled or self.disputed or self.released:
-            gl.vm.UserError.immediate("Escrow cannot be released in its current state")
+            raise gl.vm.UserError("Escrow cannot be released in its current state")
         self.released = True
         return "Escrow release approved"
 
     @gl.public.write
     def raise_dispute(self):
         if self.released or self.cancelled:
-            gl.vm.UserError.immediate("Escrow is already closed")
+            raise gl.vm.UserError("Escrow is already closed")
         self.disputed = True
         return "Escrow dispute raised"
 
     @gl.public.write
     def cancel_escrow(self):
         if self.released:
-            gl.vm.UserError.immediate("Released escrow cannot be cancelled")
+            raise gl.vm.UserError("Released escrow cannot be cancelled")
         self.cancelled = True
         return "Escrow cancelled"
 
@@ -284,7 +284,7 @@ class EscrowContract(gl.contract.Contract):
 
 SUBSCRIPTION_TEMPLATE = f"""{HEADER}
 
-class SubscriptionContract(gl.contract.Contract):
+class SubscriptionContract(gl.Contract):
     payer: Address
     recipient: Address
     amount: u256
@@ -305,7 +305,7 @@ class SubscriptionContract(gl.contract.Contract):
     @gl.public.write
     def record_payment(self):
         if not self.active:
-            gl.vm.UserError.immediate("Subscription is paused or cancelled")
+            raise gl.vm.UserError("Subscription is paused or cancelled")
         self.payment_count += 1
         return "Subscription payment recorded"
 
@@ -331,7 +331,7 @@ class SubscriptionContract(gl.contract.Contract):
 
 BOUNTY_TEMPLATE = f"""{HEADER}
 
-class BountyContract(gl.contract.Contract):
+class BountyContract(gl.Contract):
     issuer: Address
     title: str
     description: str
@@ -356,14 +356,14 @@ class BountyContract(gl.contract.Contract):
     @gl.public.write
     def review_submission(self, submitter: Address):
         if not self.open:
-            gl.vm.UserError.immediate("Bounty is closed")
+            raise gl.vm.UserError("Bounty is closed")
         self.submission_count += 1
         return f"Submission reviewed for {{submitter}}"
 
     @gl.public.write
     def select_winner(self, winner: Address):
         if not self.open:
-            gl.vm.UserError.immediate("Bounty is closed")
+            raise gl.vm.UserError("Bounty is closed")
         self.winner = winner
         self.winner_selected = True
         self.open = False

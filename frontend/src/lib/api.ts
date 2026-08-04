@@ -1,5 +1,6 @@
 export interface Intent {
-  action: 'transfer' | 'check_balance' | 'deploy_contract' | 'generate_contract' | 'contract_review' | 'contract_call' | 'conditional_payment' | 'escrow' | 'subscription' | 'bounty' | 'unknown';
+  action: 'transfer' | 'check_balance' | 'deploy_contract' | 'generate_contract' | 'contract_review' | 'contract_call' | 'conditional_payment' | 'escrow' | 'subscription' | 'bounty' | 'debug_trace' | 'appeal_transaction' | 'unknown';
+  tx_hash?: string;
   amount?: number;
   token?: string;
   recipient?: string;

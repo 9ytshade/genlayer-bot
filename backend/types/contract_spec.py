@@ -10,6 +10,10 @@ ContractType = Literal[
     "treasury",
     "bounty",
     "ai_arbitration",
+    "web_verified_payment",
+    "screenshot_verification",
+    "content_moderation",
+    "contract_factory",
 ]
 
 

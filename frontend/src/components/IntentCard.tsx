@@ -1,6 +1,6 @@
 import React from 'react';
 import { Intent } from '../lib/api';
-import { TerminalSquare, Send, Wallet, FileCode, Sparkles, ClipboardCheck, Repeat, Handshake, Trophy, Workflow } from 'lucide-react';
+import { TerminalSquare, Send, Wallet, FileCode, Sparkles, ClipboardCheck, Repeat, Handshake, Trophy, Workflow, Bug, ShieldAlert } from 'lucide-react';
 import RiskIndicator from './RiskIndicator';
 
 const ACTION_ICON = {
@@ -14,6 +14,8 @@ const ACTION_ICON = {
   escrow: Handshake,
   subscription: Repeat,
   bounty: Trophy,
+  debug_trace: Bug,
+  appeal_transaction: ShieldAlert,
   unknown: TerminalSquare,
 } as const;
 

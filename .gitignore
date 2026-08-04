@@ -11,6 +11,8 @@ __pycache__/
 *$py.class
 *.so
 # Python virtual environments
+.venv/
+.venv-win/
 /env/
 /venv/
 /ENV/

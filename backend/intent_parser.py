@@ -148,6 +148,27 @@ def parse_with_patterns(user_input: str, wallet_address: str | None = None) -> d
                     "token": "GEN"
                 }
     
+    # DEBUG TRACE patterns
+    if any(pattern in lower_input for pattern in ['debug tx', 'trace tx', 'debug transaction', 'trace transaction', 'inspect tx', 'inspect transaction']):
+        tx_hash = extract_ethereum_address(user_input)  # reuse hex extraction
+        tx_match = re.search(r'(0x[a-fA-F0-9]{64})', user_input)
+        if tx_match:
+            return {
+                "action": "debug_trace",
+                "tx_hash": tx_match.group(1)
+            }
+        return {"action": "unknown", "error": "Transaction hash required for debug trace"}
+
+    # APPEAL TRANSACTION patterns
+    if any(pattern in lower_input for pattern in ['appeal tx', 'appeal transaction', 'challenge tx', 'challenge transaction', 'dispute tx']):
+        tx_match = re.search(r'(0x[a-fA-F0-9]{64})', user_input)
+        if tx_match:
+            return {
+                "action": "appeal_transaction",
+                "tx_hash": tx_match.group(1)
+            }
+        return {"action": "unknown", "error": "Transaction hash required for appeal"}
+
     # CHECK BALANCE patterns
     if any(pattern in lower_input for pattern in ['balance', 'how much', 'do i have', 'check', 'what\'s my']):
         return {"action": "check_balance"}

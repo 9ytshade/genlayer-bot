@@ -33,7 +33,7 @@ class ConditionalPaymentContract(gl.Contract):
     @gl.public.write
     def mark_condition_satisfied(self):
         if self.executed:
-            gl.advanced.user_error_immediate("Conditional payment already executed")
+            raise gl.vm.UserError("Conditional payment already executed")
         self.executed = True
         return "Condition satisfied. Payment workflow marked executed."
 
@@ -78,7 +78,7 @@ class EscrowContract(gl.Contract):
     @gl.public.write
     def approve_release(self):
         if self.cancelled or self.disputed or self.released:
-            gl.advanced.user_error_immediate("Escrow cannot be released in its current state")
+            raise gl.vm.UserError("Escrow cannot be released in its current state")
         self.buyer_approved = True
         self.released = True
         return "Escrow release approved"
@@ -86,14 +86,14 @@ class EscrowContract(gl.Contract):
     @gl.public.write
     def raise_dispute(self):
         if self.released or self.cancelled:
-            gl.advanced.user_error_immediate("Escrow is already closed")
+            raise gl.vm.UserError("Escrow is already closed")
         self.disputed = True
         return "Escrow dispute raised"
 
     @gl.public.write
     def cancel_escrow(self):
         if self.released:
-            gl.advanced.user_error_immediate("Released escrow cannot be cancelled")
+            raise gl.vm.UserError("Released escrow cannot be cancelled")
         self.cancelled = True
         return "Escrow cancelled"
 
@@ -134,7 +134,7 @@ class SubscriptionContract(gl.Contract):
     @gl.public.write
     def record_payment(self):
         if not self.active:
-            gl.advanced.user_error_immediate("Subscription is paused or cancelled")
+            raise gl.vm.UserError("Subscription is paused or cancelled")
         self.payment_count += 1
         return "Subscription payment recorded"
 
@@ -194,14 +194,14 @@ class BountyContract(gl.Contract):
     @gl.public.write
     def review_submission(self, submitter: Address):
         if not self.open:
-            gl.advanced.user_error_immediate("Bounty is closed")
+            raise gl.vm.UserError("Bounty is closed")
         self.submission_count += 1
         return f"Submission reviewed for {submitter}"
 
     @gl.public.write
     def select_winner(self, winner: Address):
         if not self.open:
-            gl.advanced.user_error_immediate("Bounty is closed")
+            raise gl.vm.UserError("Bounty is closed")
         self.winner = winner
         self.winner_selected = True
         self.open = False

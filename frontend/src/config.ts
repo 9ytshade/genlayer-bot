@@ -1,7 +1,7 @@
 const defaultApiUrl = 'http://127.0.0.1:8000';
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL?.replace('localhost', '127.0.0.1') || defaultApiUrl;
 
-export type NetworkKey = 'bradbury' | 'studionet';
+export type NetworkKey = 'bradbury' | 'studionet' | 'localnet';
 
 export const DEFAULT_NETWORK: NetworkKey = 'studionet';
 
@@ -31,4 +31,12 @@ export const NETWORK_CONFIG: Record<NetworkKey, { label: string; chainId: number
       'https://studio.genlayer.com/api'
     ),
   },
+  localnet: {
+    label: 'Localnet',
+    chainId: Number(process.env.NEXT_PUBLIC_LOCALNET_CHAIN_ID || 61127),
+    rpcUrl: rpcUrl(process.env.NEXT_PUBLIC_LOCALNET_RPC, 'http://127.0.0.1:4000/api'),
+  },
 };
+
+export const FAUCET_URL = 'https://faucet.genlayer.com';
+export const EXPLORER_URL = 'https://explorer.genlayer.com';

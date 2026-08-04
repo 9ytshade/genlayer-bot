@@ -47,6 +47,10 @@ def validate_python_contract(code: str) -> dict[str, Any]:
     ):
         warnings.append("No `genlayer` import was found. The file may still be valid, but it does not obviously use GenLayer helpers.")
 
+    first_line = normalized_code.splitlines()[0].strip() if normalized_code.splitlines() else ""
+    if not first_line.startswith('# { "Depends"') and not first_line.startswith("# { 'Depends'"):
+        warnings.append('Missing version header. GenLayer contracts should start with: # { "Depends": "py-genlayer:<hash>" }')
+
     if not any(
         isinstance(node, ast.FunctionDef) and node.name == "__init__"
         for class_def in class_defs

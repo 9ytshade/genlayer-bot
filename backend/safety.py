@@ -14,6 +14,8 @@ SUPPORTED_ACTIONS = {
     "escrow",
     "subscription",
     "bounty",
+    "debug_trace",
+    "appeal_transaction",
     "unknown",
 }
 
@@ -143,6 +145,13 @@ def normalize_intent(raw_intent: dict[str, Any]) -> dict[str, Any]:
             except (TypeError, ValueError):
                 intent["reward"] = 0
 
+    elif action == "debug_trace":
+        intent["tx_hash"] = str(raw_intent.get("tx_hash", "")).strip()
+
+    elif action == "appeal_transaction":
+        intent["tx_hash"] = str(raw_intent.get("tx_hash", "")).strip()
+        intent["consensus_tx_id"] = str(raw_intent.get("consensus_tx_id", "")).strip()
+
     return intent
 
 
@@ -224,5 +233,13 @@ def validate_intent(intent: dict[str, Any]) -> tuple[bool, str]:
             validate_workflow_config(workflow_config, intent.get("buyer"))
         except WorkflowValidationError as exc:
             return False, str(exc)
+
+    if intent.get("action") == "debug_trace":
+        if not intent.get("tx_hash"):
+            return False, "Transaction hash is required for debug trace."
+
+    if intent.get("action") == "appeal_transaction":
+        if not intent.get("tx_hash") and not intent.get("consensus_tx_id"):
+            return False, "Transaction hash or consensus transaction ID is required for appeal."
 
     return True, ""

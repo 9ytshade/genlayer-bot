@@ -1,10 +1,10 @@
 import os
 
-# Supported networks: "studionet" (default), "bradbury"
+# Supported networks: "studionet" (default), "bradbury", "localnet"
 # When network=None is passed to get_network_config(), it resolves to "studionet".
 # Set GENLAYER_RPC_URL_STUDIONET or GENLAYER_RPC_URL_BRADBURY in your environment.
 
-SUPPORTED_NETWORKS = ("bradbury", "studionet")
+SUPPORTED_NETWORKS = ("bradbury", "studionet", "localnet")
 DEFAULT_NETWORK = "studionet"
 
 
@@ -25,6 +25,9 @@ def get_network_config(network: str | None) -> tuple[str, str, int]:
     if normalized == "studionet":
         rpc_url = os.getenv("GENLAYER_RPC_URL_STUDIONET")
         chain_id = int(os.getenv("GENLAYER_CHAIN_ID_STUDIONET", "61999"))
+    elif normalized == "localnet":
+        rpc_url = os.getenv("GENLAYER_RPC_URL_LOCALNET", "http://127.0.0.1:4000/api")
+        chain_id = int(os.getenv("GENLAYER_CHAIN_ID_LOCALNET", "61127"))
     else:
         rpc_url = os.getenv("GENLAYER_RPC_URL_BRADBURY") or os.getenv("GENLAYER_RPC_URL")
         chain_id = int(

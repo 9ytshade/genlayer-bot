@@ -22,6 +22,10 @@ SUPPORTED_TYPES: tuple[ContractType, ...] = (
     "treasury",
     "bounty",
     "ai_arbitration",
+    "web_verified_payment",
+    "screenshot_verification",
+    "content_moderation",
+    "contract_factory",
 )
 
 
@@ -68,7 +72,10 @@ class ContractGenerationService:
         prompt = """
         Convert the user's request into a strict JSON contract specification.
         Do not generate Python code.
-        Supported contractType values: escrow, conditional_payment, subscription, dao_voting, treasury, bounty, ai_arbitration.
+        Supported contractType values: escrow, conditional_payment, subscription, dao_voting, treasury, bounty, ai_arbitration, web_verified_payment, screenshot_verification, content_moderation, contract_factory.
+        Use web_verified_payment when the user wants to verify conditions using live web/API data.
+        Use screenshot_verification when the user wants to verify visual content of a webpage.
+        Use content_moderation when the user wants AI-powered content review against guidelines.
         Fields: contractType, contractName, description, participants, releaseCondition, paymentCondition, amount, token, features.
         Use concise safe defaults when the user omits details.
         """
@@ -163,6 +170,26 @@ class ContractGenerationService:
             name = "AIArbitrationContract"
             condition = "ai_resolved_dispute"
             participants = 2
+        elif any(kw in text for kw in ("api", "web data", "live data", "web verified", "price feed", "weather", "flight", "sports score")):
+            ctype = "web_verified_payment"
+            name = "WebVerifiedPaymentContract"
+            condition = request_text.strip() or "API condition is met"
+            participants = 2
+        elif any(kw in text for kw in ("screenshot", "verify website", "visual", "page content", "webpage")):
+            ctype = "screenshot_verification"
+            name = "ScreenshotVerificationContract"
+            condition = request_text.strip() or "page content matches criteria"
+            participants = 1
+        elif any(kw in text for kw in ("moderate", "moderation", "content review", "guidelines", "flag content")):
+            ctype = "content_moderation"
+            name = "ContentModerationContract"
+            condition = request_text.strip() or "content follows guidelines"
+            participants = 1
+        elif any(kw in text for kw in ("factory", "deploy child", "spawn contract", "child contract")):
+            ctype = "contract_factory"
+            name = "ContractFactory"
+            condition = request_text.strip() or "factory deployed child contract"
+            participants = 1
         else:
             ctype = "conditional_payment"
             name = "ConditionalPaymentContract"
@@ -187,13 +214,17 @@ class ContractGenerationService:
 
     def explain(self, spec: ContractSpec) -> str:
         fallback = {
-            "escrow": "This contract acts as an escrow. Funds or obligations are considered releasable only after both configured parties approve.",
+            "escrow": "This contract acts as an escrow that can receive native GEN deposits. Funds are releasable only after both parties approve. It uses the payable __receive__ method to accept transfers.",
             "conditional_payment": "This contract records a conditional payment workflow and uses GenLayer consensus to evaluate whether the requested condition is satisfied.",
             "subscription": "This contract tracks active subscriptions and lets users subscribe or cancel their own status.",
             "dao_voting": "This contract supports proposal creation and one vote per address for each proposal.",
             "treasury": "This contract maintains a simple treasury approval list controlled by the owner.",
             "bounty": "This contract lets an issuer accept a bounty submission and record the winning submitter.",
-            "ai_arbitration": "This contract uses GenLayer AI consensus to produce a dispute ruling from submitted evidence.",
+            "ai_arbitration": "This contract uses GenLayer AI consensus with comparative equivalence to produce a dispute ruling from submitted evidence. Multiple validators independently reason about the dispute and agree on semantically equivalent outcomes.",
+            "web_verified_payment": "This contract fetches live data from a web API using gl.nondet.web.get() and uses AI to evaluate whether a real-world condition is satisfied before releasing payment. Ideal for sports scores, flight status, price feeds, and weather-based conditions.",
+            "screenshot_verification": "This contract captures a webpage screenshot using gl.nondet.web.render() and analyzes it with AI vision (gl.nondet.exec_prompt with images) to verify visual content against specified criteria.",
+            "content_moderation": "This contract uses AI consensus to moderate submitted content against community guidelines. It returns structured JSON decisions with severity levels using gl.nondet.exec_prompt(response_format='json').",
+            "contract_factory": "This contract serves as a factory to deploy child contracts. It tracks deployed child addresses and provides methods to query them.",
         }[spec.contract_type]
         if not self.client:
             return fallback
