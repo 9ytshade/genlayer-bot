@@ -229,7 +229,8 @@ def resolve_network_or_400(network: str | None) -> str:
 
 def is_deploy_contract_request(message: str) -> bool:
     normalized = " ".join(message.lower().strip().split())
-    return normalized.startswith((
+    # Match explicit commands first
+    if normalized.startswith((
         "deploy contract",
         "deploy a contract",
         "deploy an intelligent contract",
@@ -237,7 +238,15 @@ def is_deploy_contract_request(message: str) -> bool:
         "upload a contract",
         "submit contract",
         "submit a contract",
-    ))
+    )):
+        return True
+
+    # Also accept natural language variants like "deploy this contract" or
+    # "please deploy contract" by checking that both keywords are present.
+    if "deploy" in normalized and "contract" in normalized:
+        return True
+
+    return False
 
 
 def is_help_request(message: str) -> bool:
