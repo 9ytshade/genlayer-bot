@@ -229,7 +229,8 @@ def resolve_network_or_400(network: str | None) -> str:
 
 def is_deploy_contract_request(message: str) -> bool:
     normalized = " ".join(message.lower().strip().split())
-    return normalized.startswith((
+    # Match explicit commands first
+    if normalized.startswith((
         "deploy contract",
         "deploy a contract",
         "deploy an intelligent contract",
@@ -237,7 +238,38 @@ def is_deploy_contract_request(message: str) -> bool:
         "upload a contract",
         "submit contract",
         "submit a contract",
-    ))
+    )):
+        return True
+
+    # Also accept natural language variants like "deploy this contract" or
+    # "please deploy contract" by checking that both keywords are present.
+    if "deploy" in normalized and "contract" in normalized:
+        return True
+
+    return False
+
+
+def extract_code_from_message(message: str) -> str:
+    """Try to extract Python contract code from a chat message.
+
+    - Prefer fenced code blocks (```python or ```),
+    - Otherwise, take the portion after the first blank line (typical "Deploy this contract:\n\n<code>").
+    """
+    import re
+    if not message:
+        return ""
+
+    # Fenced code block
+    m = re.search(r'```(?:python\n)?(.*?)```', message, re.S | re.I)
+    if m:
+        return m.group(1).strip()
+
+    # If message contains a double-newline separator, assume code follows
+    parts = message.split('\n\n', 1)
+    if len(parts) > 1 and parts[1].strip():
+        return parts[1].strip()
+
+    return ""
 
 
 def is_help_request(message: str) -> bool:
@@ -428,7 +460,12 @@ async def handle_chat(request: Request, chat_request: ChatRequest):
 
     intent = normalize_intent(parse_intent(chat_request.message, chat_request.wallet_address))
     if intent.get("action") == "unknown" and is_deploy_contract_request(chat_request.message):
-        intent = {"action": "deploy_contract"}
+            # Try to extract any uploaded or pasted contract code from the message
+            code = extract_code_from_message(chat_request.message)
+            if code:
+                intent = {"action": "deploy_contract", "code": code}
+            else:
+                intent = {"action": "deploy_contract"}
 
     if intent.get("action") == "deploy_contract" and intent.get("code"):
         validation = validate_python_contract(str(intent["code"]))
