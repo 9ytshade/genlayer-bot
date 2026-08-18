@@ -1,26 +1,27 @@
 from datetime import datetime, timedelta, timezone
+import hashlib
 import os
-import secrets
 from typing import Any
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
-from eth_account import Account
-from eth_account.messages import encode_defunct
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from jose import JWTError, jwt
 from pydantic import BaseModel
+from siwe import SiweMessage, VerificationError, generate_nonce
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from web3 import Web3
 
 from .database import get_db
-from .models import User
+from .models import SiweNonce, User
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 24
 NONCE_EXPIRE_MINUTES = 10
-NONCES: dict[str, tuple[str, datetime]] = {}
+SIWE_ISSUED_AT_SKEW_SECONDS = 120
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -52,6 +53,26 @@ def normalize_address(address: str) -> str:
     if not Web3.is_address(address):
         raise HTTPException(status_code=400, detail="Invalid wallet address")
     return Web3.to_checksum_address(address)
+
+
+def _hash_nonce(nonce: str) -> str:
+    return hashlib.sha256(nonce.encode("ascii")).hexdigest()
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _nonce_from_message(message: str) -> str:
+    try:
+        nonce = str(SiweMessage.from_message(message).nonce)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=401, detail="Invalid SIWE message or signature") from exc
+    if not nonce:
+        raise HTTPException(status_code=401, detail="Invalid SIWE message or signature")
+    return nonce
 
 
 def create_access_token(wallet_address: str) -> str:
@@ -97,63 +118,163 @@ def get_current_user(token: str = Depends(get_bearer_token), db: Session = Depen
     return user
 
 
-def extract_nonce(message: str) -> str | None:
-    for line in message.splitlines():
-        if line.startswith("Nonce:"):
-            return line.split(":", 1)[1].strip()
-    return None
+def get_allowed_siwe_origins() -> dict[str, str]:
+    configured = os.getenv("SIWE_ORIGINS") or os.getenv(
+        "ALLOWED_ORIGINS",
+        "http://localhost:3000",
+    )
+    origins: dict[str, str] = {}
+    for raw_origin in configured.split(","):
+        candidate = raw_origin.strip()
+        if not candidate:
+            continue
+        if "://" not in candidate:
+            candidate = f"http://{candidate}"
+        parsed = urlparse(candidate)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            continue
+        origins[parsed.netloc.lower()] = f"{parsed.scheme}://{parsed.netloc}".lower()
+    if not origins:
+        raise HTTPException(status_code=500, detail="No valid SIWE origins are configured")
+    return origins
 
 
-def verify_siwe_signature(message: str, signature: str, expected_address: str, expected_nonce: str) -> None:
-    siwe_message = None
+def get_allowed_siwe_chain_ids() -> set[int] | None:
+    configured = os.getenv("SIWE_CHAIN_IDS")
+    if not configured:
+        return None
     try:
-        from siwe import SiweMessage  # type: ignore
+        return {int(value.strip()) for value in configured.split(",") if value.strip()}
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail="SIWE_CHAIN_IDS contains an invalid chain id") from exc
 
-        if hasattr(SiweMessage, "from_message"):
-            siwe_message = SiweMessage.from_message(message)
-            if getattr(siwe_message, "nonce", None) != expected_nonce:
-                raise HTTPException(status_code=401, detail="Invalid SIWE nonce")
-    except ImportError:
-        pass
 
-    if extract_nonce(message) != expected_nonce:
-        raise HTTPException(status_code=401, detail="Invalid SIWE nonce")
+def verify_siwe_signature(
+    message: str,
+    signature: str,
+    expected_address: str,
+    expected_nonce: str,
+    nonce_expires_at: datetime,
+) -> None:
+    try:
+        siwe_message = SiweMessage.from_message(message)
+        allowed_origins = get_allowed_siwe_origins()
+        domain = str(siwe_message.domain).lower()
+        expected_origin = allowed_origins.get(domain)
+        if not expected_origin:
+            raise HTTPException(status_code=401, detail="SIWE domain is not allowed")
 
-    recovered = Account.recover_message(encode_defunct(text=message), signature=signature)
-    if Web3.to_checksum_address(recovered) != normalize_address(expected_address):
-        raise HTTPException(status_code=401, detail="Signature does not match wallet address")
-
-    if siwe_message is not None:
-        message_address = getattr(siwe_message, "address", None)
-        if message_address and Web3.to_checksum_address(message_address) != normalize_address(expected_address):
+        parsed_uri = urlparse(str(siwe_message.uri))
+        message_origin = f"{parsed_uri.scheme}://{parsed_uri.netloc}".lower()
+        if message_origin != expected_origin:
+            raise HTTPException(status_code=401, detail="SIWE URI does not match the allowed origin")
+        if str(siwe_message.uri).rstrip("/").lower() != expected_origin.rstrip("/"):
+            raise HTTPException(status_code=401, detail="SIWE URI does not match the allowed resource")
+        allowed_chain_ids = get_allowed_siwe_chain_ids()
+        if allowed_chain_ids is not None and int(siwe_message.chain_id) not in allowed_chain_ids:
+            raise HTTPException(status_code=401, detail="SIWE chain id is not supported")
+        if Web3.to_checksum_address(str(siwe_message.address)) != normalize_address(expected_address):
             raise HTTPException(status_code=401, detail="SIWE address does not match wallet address")
+
+        issued_at = datetime.fromisoformat(str(siwe_message.issued_at).replace("Z", "+00:00"))
+        if issued_at.tzinfo is None:
+            issued_at = issued_at.replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+        earliest_issue = nonce_expires_at - timedelta(
+            minutes=NONCE_EXPIRE_MINUTES,
+            seconds=SIWE_ISSUED_AT_SKEW_SECONDS,
+        )
+        latest_issue = now + timedelta(seconds=SIWE_ISSUED_AT_SKEW_SECONDS)
+        if issued_at < earliest_issue or issued_at > latest_issue:
+            raise HTTPException(status_code=401, detail="SIWE issued-at time is outside the allowed window")
+
+        siwe_message.verify(
+            signature,
+            domain=str(siwe_message.domain),
+            nonce=expected_nonce,
+            timestamp=now,
+        )
+    except HTTPException:
+        raise
+    except (VerificationError, ValueError, TypeError) as exc:
+        raise HTTPException(status_code=401, detail="Invalid SIWE message or signature") from exc
 
 
 @router.get("/nonce", response_model=NonceResponse)
-def get_nonce(address: str = Query(...)) -> NonceResponse:
+def get_nonce(address: str = Query(...), db: Session = Depends(get_db)) -> NonceResponse:
     wallet_address = normalize_address(address)
-    nonce = secrets.token_urlsafe(16)
-    NONCES[wallet_address.lower()] = (
-        nonce,
-        datetime.now(timezone.utc) + timedelta(minutes=NONCE_EXPIRE_MINUTES),
-    )
+    nonce = generate_nonce()
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(minutes=NONCE_EXPIRE_MINUTES)
+    nonce_record = db.query(SiweNonce).filter(SiweNonce.wallet_address == wallet_address).first()
+    if nonce_record:
+        nonce_record.nonce_hash = _hash_nonce(nonce)
+        nonce_record.created_at = now
+        nonce_record.expires_at = expires_at
+    else:
+        db.add(
+            SiweNonce(
+                wallet_address=wallet_address,
+                nonce_hash=_hash_nonce(nonce),
+                created_at=now,
+                expires_at=expires_at,
+            )
+        )
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        nonce_record = db.query(SiweNonce).filter(SiweNonce.wallet_address == wallet_address).first()
+        if not nonce_record:
+            raise HTTPException(status_code=503, detail="Unable to issue SIWE nonce")
+        nonce_record.nonce_hash = _hash_nonce(nonce)
+        nonce_record.created_at = now
+        nonce_record.expires_at = expires_at
+        db.commit()
     return NonceResponse(nonce=nonce)
 
 
 @router.post("/verify", response_model=VerifyResponse)
 def verify_signature(request: VerifyRequest, db: Session = Depends(get_db)) -> VerifyResponse:
     wallet_address = normalize_address(request.address)
-    nonce_entry = NONCES.get(wallet_address.lower())
-    if not nonce_entry:
+    nonce = _nonce_from_message(request.message)
+    nonce_hash = _hash_nonce(nonce)
+    nonce_record = (
+        db.query(SiweNonce)
+        .filter(
+            SiweNonce.wallet_address == wallet_address,
+            SiweNonce.nonce_hash == nonce_hash,
+        )
+        .with_for_update()
+        .first()
+    )
+    if not nonce_record:
         raise HTTPException(status_code=401, detail="No SIWE nonce found for this wallet")
 
-    nonce, expires_at = nonce_entry
+    expires_at = _as_utc(nonce_record.expires_at)
+    deleted = (
+        db.query(SiweNonce)
+        .filter(
+            SiweNonce.id == nonce_record.id,
+            SiweNonce.nonce_hash == nonce_hash,
+        )
+        .delete(synchronize_session=False)
+    )
+    if deleted != 1:
+        db.rollback()
+        raise HTTPException(status_code=401, detail="No SIWE nonce found for this wallet")
+    db.commit()
+
     if datetime.now(timezone.utc) > expires_at:
-        NONCES.pop(wallet_address.lower(), None)
         raise HTTPException(status_code=401, detail="SIWE nonce has expired")
 
-    verify_siwe_signature(request.message, request.signature, wallet_address, nonce)
-    NONCES.pop(wallet_address.lower(), None)
+    verify_siwe_signature(
+        request.message,
+        request.signature,
+        wallet_address,
+        nonce,
+        expires_at,
+    )
 
     user = db.query(User).filter(User.connected_wallet_address == wallet_address).first()
     if not user:

@@ -1,10 +1,9 @@
-﻿name: CI
+name: CI
 
 on:
-  push:
-    branches: [ main, master, develop ]
   pull_request:
-    branches: [ main, master ]
+  push:
+    branches: [main, master, develop]
 
 jobs:
   backend:
@@ -12,88 +11,41 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-
-      - name: Cache pip
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/backend/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
-      - name: Install backend deps
-        run: python -m pip install --upgrade pip && python -m pip install -r backend/requirements.txt
-
-      - name: Compile Python files (syntax check)
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -r backend/requirements.txt
+      - name: Compile Python files
         run: |
           python - <<'PY'
-          import py_compile, glob
-          files = glob.glob('backend/**/*.py', recursive=True)
-          for f in files:
-              py_compile.compile(f, doraise=True)
-          print('Compiled', len(files), 'files')
+          import glob
+          import py_compile
+          files = glob.glob("backend/**/*.py", recursive=True)
+          for file_name in files:
+              py_compile.compile(file_name, doraise=True)
+          print(f"Compiled {len(files)} files")
           PY
-
-      - name: Run backend tests
-        run: python -m pytest backend/tests -q
+      - run: python -m pytest backend/tests -q
 
   frontend:
-    name: Frontend build
+    name: Frontend checks
     runs-on: ubuntu-latest
     needs: backend
+    defaults:
+      run:
+        working-directory: frontend
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install frontend deps
-        working-directory: frontend
-        run: npm ci
-
-      - name: Lint frontend
-        working-directory: frontend
-        run: npm run lint
-
-      - name: Build frontend
-        working-directory: frontend
-        run: npm run build
-
-  deploy_staging:
-    name: Deploy to staging (develop)
-    runs-on: ubuntu-latest
-    needs: frontend
-    if: github.ref == 'refs/heads/develop'
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Deploy backend to Render (staging)
-        env:
-          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
-          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
-        run: |
-          echo "Triggering Render deploy for service $RENDER_SERVICE_ID"
-          curl -s -X POST "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys" \
-            -H "Authorization: Bearer $RENDER_API_KEY" \
-            -H "Content-Type: application/json" \
-            -d '{"clearCache":true}' | jq || true
-
-      - name: Install Vercel CLI
-        run: npm install -g vercel
-
-      - name: Deploy frontend to Vercel (staging)
-        working-directory: frontend
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: |
-          echo "Triggering Vercel deployment (will create a preview)"
-          vercel --token $VERCEL_TOKEN --confirm --prod || vercel --token $VERCEL_TOKEN --confirm || true
-
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run test:lifecycle
+      - run: npm run test:notary
+      - run: npm run build

@@ -39,7 +39,15 @@ def init_db():
     # Import models here to ensure their table definitions are registered
     # with Base.metadata before create_all is called, regardless of
     # import order in the application startup sequence.
-    from .models import ChatHistory, User, WorkflowDeployment  # noqa: F401
+    from .models import (  # noqa: F401
+        ChatHistory,
+        NotaryClaim,
+        NotaryRegistry,
+        PreparedTransaction,
+        SiweNonce,
+        User,
+        WorkflowDeployment,
+    )
     Base.metadata.create_all(bind=engine)
 
 

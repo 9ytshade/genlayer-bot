@@ -5,7 +5,9 @@ import SimulationCard from './SimulationCard';
 import ConfirmationButtons from './ConfirmationButtons';
 import DeployContractPanel from './DeployContractPanel';
 import { WorkflowPanel } from './WorkflowPanel';
-import { Bot, UserRound, Check, Loader2, Copy, AlertCircle, RefreshCw, Download, Rocket, ExternalLink } from 'lucide-react';
+import NotaryBlueprintPanel from './NotaryBlueprintPanel';
+import NotaryRecordPanel from './NotaryRecordPanel';
+import { Bot, UserRound, Check, Loader2, Copy, AlertCircle, RefreshCw, Download, Rocket, ExternalLink, ShieldAlert } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 interface MessageProps {
@@ -14,10 +16,12 @@ interface MessageProps {
   onCancel: (id: string) => void;
   onUpdateIntent: (id: string, patch: Partial<NonNullable<MessageData['intent']>>) => void;
   onWorkflowAction: (id: string, action: string, data?: unknown) => void;
+  onNotaryAction: (id: string, action: 'submit_claim' | 'evaluate_claim' | 'refresh') => void;
   onRunCommand?: (command: string) => void;
+  walletAddress?: string;
 }
 
-export default function Message({ msg, onConfirm, onCancel, onUpdateIntent, onWorkflowAction, onRunCommand }: MessageProps) {
+export default function Message({ msg, onConfirm, onCancel, onUpdateIntent, onWorkflowAction, onNotaryAction, onRunCommand, walletAddress }: MessageProps) {
   const isUser = msg.role === 'user';
   const [copied, setCopied] = useState(false);
   const [copiedAddress, setCopiedAddress] = useState<string | null>(null);
@@ -26,6 +30,35 @@ export default function Message({ msg, onConfirm, onCancel, onUpdateIntent, onWo
   const configuredTxExplorerBase = process.env.NEXT_PUBLIC_EXPLORER_TX_URL;
   const txExplorerBase = configuredTxExplorerBase || 'https://explorer-studio.genlayer.com/tx/';
   const txExplorerUrl = isRealTxHash ? `${txExplorerBase}${msg.txHash}` : null;
+  const hasConsensusLifecycle = Boolean(
+    msg.consensusTxId
+    && ['submitted', 'finalized', 'success', 'error'].includes(msg.status || '')
+  );
+  const showTransactionCard = Boolean(
+    hasConsensusLifecycle
+    || (msg.txHash && ['submitted', 'success', 'error'].includes(msg.status || ''))
+  );
+  const transactionCardTone = msg.status === 'success'
+    ? 'text-accent-success'
+    : msg.status === 'error'
+      ? 'border-accent-danger/70 bg-accent-danger/10 text-accent-danger'
+      : msg.status === 'finalized'
+        ? 'border-accent-warning/70 bg-accent-warning/10 text-accent-warning'
+        : 'text-accent-primary';
+  const consensusPillTone = msg.status === 'success'
+    ? 'border-accent-success/45 bg-accent-success/5 text-accent-success'
+    : msg.status === 'error'
+      ? 'border-accent-danger/45 bg-accent-danger/5 text-accent-danger'
+      : msg.status === 'finalized'
+        ? 'border-accent-warning/45 bg-accent-warning/5 text-accent-warning'
+        : 'border-accent-primary/45 bg-accent-primary/5 text-accent-primary';
+  const hasVerifiedExecutionSuccess = (
+    msg.status === 'success'
+    && (
+      msg.executionStatus === 'FINISHED_WITH_RETURN'
+      || !msg.consensusTxId
+    )
+  );
 
   const handleCopyHash = (hash: string) => {
     navigator.clipboard.writeText(hash);
@@ -55,6 +88,15 @@ export default function Message({ msg, onConfirm, onCancel, onUpdateIntent, onWo
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
+  };
+
+  const handleRetry = () => {
+    const operation = msg.intent?.notary_operation;
+    if (operation === 'submit_claim' || operation === 'evaluate_claim') {
+      onNotaryAction(msg.id, operation);
+      return;
+    }
+    onConfirm(msg.id);
   };
 
   const formatTime = (id: string) => {
@@ -130,6 +172,16 @@ export default function Message({ msg, onConfirm, onCancel, onUpdateIntent, onWo
               <p className="mt-4 text-[12px] leading-relaxed text-text-secondary">
                 {msg.generatedContract.explanation}
               </p>
+              {msg.generatedContract.sourceHash ? (
+                <div className="mt-4 grid gap-2 rounded-[8px] border border-border-subtle bg-bg-base/55 p-3 font-mono text-[9px] text-text-secondary sm:grid-cols-[120px_minmax(0,1fr)]">
+                  <span className="uppercase text-text-muted">Source SHA-256</span>
+                  <span className="break-all text-right text-text-primary">{msg.generatedContract.sourceHash}</span>
+                  <span className="uppercase text-text-muted">GenVM runtime</span>
+                  <span className="break-all text-right">{msg.generatedContract.pyGenlayerDependency}</span>
+                  <span className="uppercase text-text-muted">Validator</span>
+                  <span className="break-all text-right">{msg.generatedContract.validatorVersion}</span>
+                </div>
+              ) : null}
             </div>
             <pre className="mx-4 mt-4 max-h-80 overflow-auto rounded-[8px] border border-border-subtle bg-bg-base p-4 font-mono text-[10px] leading-relaxed text-text-secondary sm:text-[11px]">
               {msg.generatedContract.code}
@@ -153,8 +205,8 @@ export default function Message({ msg, onConfirm, onCancel, onUpdateIntent, onWo
               </button>
               <button
                 type="button"
-                onClick={() => onConfirm(msg.id)}
-                disabled={msg.status === 'executing' || msg.status === 'success'}
+                onClick={handleRetry}
+                disabled={msg.status === 'executing' || msg.status === 'submitted' || msg.status === 'finalized' || msg.status === 'success'}
                 className="primary-action flex items-center gap-2 rounded-[8px] px-3 py-2 font-mono text-[10px] font-bold disabled:opacity-50"
               >
                 <Rocket size={12} />
@@ -164,7 +216,33 @@ export default function Message({ msg, onConfirm, onCancel, onUpdateIntent, onWo
           </div>
         )}
 
-        {!isUser && msg.intent && (
+        {!isUser && msg.notaryBlueprint && (
+          <div className="mt-2 w-full">
+            <NotaryBlueprintPanel
+              artifact={msg.notaryBlueprint}
+              contractAddress={msg.contractAddress}
+              operation={msg.intent?.notary_operation}
+              status={msg.status}
+              record={msg.notaryRecord}
+              onDeploy={() => onConfirm(msg.id)}
+              onSubmit={() => onNotaryAction(msg.id, 'submit_claim')}
+              onRefresh={() => onNotaryAction(msg.id, 'refresh')}
+            />
+          </div>
+        )}
+
+        {!isUser && msg.notaryRecord && (
+          <div className="w-full">
+            <NotaryRecordPanel
+              record={msg.notaryRecord}
+              isBusy={msg.status === 'executing' || msg.status === 'submitted' || msg.status === 'finalized'}
+              onEvaluate={() => onNotaryAction(msg.id, 'evaluate_claim')}
+              onRefresh={() => onNotaryAction(msg.id, 'refresh')}
+            />
+          </div>
+        )}
+
+        {!isUser && msg.intent && !msg.notaryBlueprint && (
           <div className="w-full mt-2">
             <IntentCard intent={msg.intent} />
           </div>
@@ -176,33 +254,41 @@ export default function Message({ msg, onConfirm, onCancel, onUpdateIntent, onWo
           </div>
         )}
 
-        {!isUser && msg.intent?.action === 'deploy_contract' && (
+        {!isUser && msg.intent?.action === 'deploy_contract' && !msg.notaryBlueprint && (
           <div className="w-full">
             <DeployContractPanel
               intent={msg.intent}
-              disabled={msg.status === 'executing' || msg.status === 'success'}
               txHash={msg.txHash}
               consensusTxId={msg.consensusTxId}
+              consensusStatus={msg.consensusStatus}
+              executionStatus={msg.executionStatus}
               contractAddress={msg.contractAddress}
               derivedAddresses={msg.derivedAddresses}
               status={msg.status}
+              disabled={msg.status === 'executing' || msg.status === 'submitted' || msg.status === 'finalized' || msg.status === 'success'}
               onChange={(patch) => onUpdateIntent(msg.id, patch)}
             />
           </div>
         )}
 
-        {!isUser && msg.workflowConfig && (
+        {!isUser
+          && msg.workflowConfig
+          && hasVerifiedExecutionSuccess
+          && msg.contractAddress
+          && (
           <div className="w-full">
             <WorkflowPanel
               config={msg.workflowConfig}
+              state={msg.workflowState}
               contractAddress={msg.contractAddress}
               deploymentTxHash={msg.txHash}
+              walletAddress={walletAddress}
               onAction={(action, data) => onWorkflowAction(msg.id, action, data)}
             />
           </div>
         )}
 
-        {!isUser && msg.status === 'awaiting_confirmation' && msg.intent && (
+        {!isUser && msg.status === 'awaiting_confirmation' && msg.intent && !msg.notaryBlueprint && (
           <div className="w-full">
             <ConfirmationButtons 
               intent={msg.intent} 
@@ -216,46 +302,159 @@ export default function Message({ msg, onConfirm, onCancel, onUpdateIntent, onWo
         {!isUser && msg.status === 'executing' && (
           <div className="mt-3 flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.08em] text-accent-primary">
             <Loader2 size={12} className="animate-spin" />
-            Executing transaction
+            {msg.intent?.action === 'check_balance'
+              ? 'Reading wallet balance'
+              : 'Waiting for wallet confirmation'}
           </div>
         )}
 
-        {!isUser && msg.status === 'success' && msg.txHash && (
-          <div className="data-card mt-3 flex w-full flex-col gap-2 p-3 font-mono text-[11px] text-accent-success">
-            <div className="flex items-center gap-2 font-bold uppercase tracking-[0.08em]">
-              <Check size={14} />
-              Transaction success
+        {!isUser && msg.contractReview && (
+          <div className="data-card mt-3 w-full p-3 font-mono text-[11px]">
+            <div className="mb-2 flex items-center justify-between gap-2 font-bold uppercase tracking-[0.08em]">
+              <span>Automated contract preflight</span>
+              <span className="status-pill border-current/30 bg-black/10">
+                {msg.contractReview.verdict.replaceAll('_', ' ')}
+              </span>
             </div>
-            <div className="flex items-center justify-between gap-2 break-all pl-6 opacity-85">
-              <span className="min-w-0 break-all">{isRealTxHash ? `HASH: ${msg.txHash}` : msg.txHash}</span>
-              <div className="flex shrink-0 items-center gap-1">
-                <button
-                  onClick={() => handleCopyHash(msg.txHash!)}
-                  className="control-button rounded-[6px] p-1"
-                  title="Copy transaction hash"
-                >
-                  <Copy size={12} className={copied ? 'text-accent-primary' : ''} />
-                </button>
-                {txExplorerUrl && (
-                  <a
-                    href={txExplorerUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="control-button flex items-center gap-1 rounded-[6px] px-2 py-1 text-[10px] text-accent-success"
-                    title="View transaction in GenLayer explorer"
-                  >
-                    <ExternalLink size={11} />
-                    Check in explorer
-                  </a>
+            <div className="space-y-1 opacity-85">
+              <div>{`Contracts: ${msg.contractReview.structural.contractNames.join(', ') || 'none detected'}`}</div>
+              <div>{`Public methods: ${msg.contractReview.structural.publicMethods.length}`}</div>
+              <div>{`GenLayer judgment: ${msg.contractReview.genlayer.requiredForBehavior ? 'detected' : 'not detected'}`}</div>
+              <div>{`Financial custody: ${msg.contractReview.safety.financialCustody ? 'detected' : 'not detected'}`}</div>
+            </div>
+            {(msg.contractReview.blockingErrors.length > 0 || msg.contractReview.warnings.length > 0) && (
+              <div className="mt-2 space-y-1 border-t border-current/20 pt-2">
+                {[...msg.contractReview.blockingErrors, ...msg.contractReview.warnings].slice(0, 8).map((finding) => (
+                  <div key={finding} className="text-accent-warning">{finding}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {!isUser && showTransactionCard && (
+          <div className={`data-card mt-3 flex w-full flex-col gap-2 p-3 font-mono text-[11px] ${transactionCardTone}`}>
+            <div className="flex items-center gap-2 font-bold uppercase tracking-[0.08em]">
+              {msg.status === 'success' ? (
+                <Check size={14} />
+              ) : msg.status === 'error' ? (
+                <AlertCircle size={14} />
+              ) : msg.status === 'finalized' ? (
+                <ShieldAlert size={14} />
+              ) : (
+                <Loader2 size={14} className="animate-spin" />
+              )}
+              {msg.status === 'success'
+                ? (msg.consensusTxId ? 'Execution successful' : 'Transaction confirmed')
+                : msg.status === 'error'
+                  ? (
+                      msg.executionStatus === 'FINISHED_WITH_ERROR'
+                        ? 'Execution failed'
+                        : 'Consensus ended'
+                    )
+                  : msg.status === 'finalized'
+                    ? 'Execution result pending'
+                    : 'Consensus in progress'}
+            </div>
+            {msg.evmStatus && (
+              <div className="flex flex-wrap items-center gap-2 pl-6 text-[10px] uppercase tracking-[0.08em]">
+                <span className="opacity-70">EVM</span>
+                <span className="status-pill border-current/30 bg-black/10">
+                  {msg.evmStatus.replaceAll('_', ' ')}
+                </span>
+              </div>
+            )}
+            {msg.consensusStatus && (
+              <div className="flex flex-wrap items-center gap-2 pl-6 text-[10px] uppercase tracking-[0.08em]">
+                <span className="opacity-70">GenLayer</span>
+                <span className={`status-pill ${consensusPillTone}`}>
+                  {msg.consensusStatus.replaceAll('_', ' ')}
+                </span>
+                {msg.consensusAppealable && (
+                  <span className="status-pill border-accent-warning/45 bg-accent-warning/5 text-accent-warning">
+                    appeal window open
+                  </span>
+                )}
+                {msg.consensusStatus === 'UNDETERMINED' && (
+                  <ShieldAlert size={13} className="text-accent-warning" aria-label="Consensus undetermined" />
                 )}
               </div>
-            </div>
+            )}
+            {msg.executionStatus && msg.executionStatus !== 'NOT_VOTED' && (
+              <div className="flex flex-wrap items-center gap-2 pl-6 text-[10px] uppercase tracking-[0.08em]">
+                <span className="opacity-70">GenVM</span>
+                <span className="status-pill border-current/30 bg-black/10">
+                  {msg.executionStatus.replaceAll('_', ' ')}
+                </span>
+              </div>
+            )}
+            {msg.txHash && (
+              <div className="flex items-center justify-between gap-2 break-all pl-6 opacity-85">
+                <span className="min-w-0 break-all">{isRealTxHash ? `HASH: ${msg.txHash}` : msg.txHash}</span>
+                <div className="flex shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => handleCopyHash(msg.txHash!)}
+                    className="control-button rounded-[6px] p-1"
+                    title="Copy transaction hash"
+                  >
+                    <Copy size={12} className={copied ? 'text-accent-primary' : ''} />
+                  </button>
+                  {txExplorerUrl && (
+                    <a
+                      href={txExplorerUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="control-button flex items-center gap-1 rounded-[6px] px-2 py-1 text-[10px] text-accent-success"
+                      title="View transaction in GenLayer explorer"
+                    >
+                      <ExternalLink size={11} />
+                      Check in explorer
+                    </a>
+                  )}
+                </div>
+              </div>
+            )}
             {msg.consensusTxId && (
               <div className="opacity-80 pl-6 break-all">
                 <span>{`CONSENSUS_TX: ${msg.consensusTxId}`}</span>
               </div>
             )}
-            {msg.contractAddress && (
+            {msg.intentHash && (
+              <div className="opacity-80 pl-6 break-all">
+                <span>{`INTENT_HASH: ${msg.intentHash}`}</span>
+              </div>
+            )}
+            {msg.transactionDiagnostics && (
+              <div className="ml-6 rounded-[6px] border border-current/25 bg-black/10 p-2 text-[10px] normal-case">
+                <div className="mb-1 font-bold uppercase tracking-[0.08em]">Transaction diagnostics</div>
+                {msg.transactionDiagnostics.code && (
+                  <div>{`Code: ${msg.transactionDiagnostics.code}`}</div>
+                )}
+                {msg.preparedTransactionId && (
+                  <div className="break-all">{`Prepared transaction: ${msg.preparedTransactionId}`}</div>
+                )}
+                {msg.transactionDiagnostics.field && (
+                  <div>{`Mismatch field: ${msg.transactionDiagnostics.field}`}</div>
+                )}
+                {msg.transactionDiagnostics.expected !== undefined
+                  && msg.transactionDiagnostics.expected !== null
+                  && (
+                  <div className="break-all">{`Expected: ${msg.transactionDiagnostics.expected}`}</div>
+                )}
+                {msg.transactionDiagnostics.actual !== undefined
+                  && msg.transactionDiagnostics.actual !== null
+                  && (
+                  <div className="break-all">{`Submitted: ${msg.transactionDiagnostics.actual}`}</div>
+                )}
+                {msg.transactionDiagnostics.retriable && (
+                  <div className="mt-1 font-bold">This confirmation can be retried safely.</div>
+                )}
+              </div>
+            )}
+            {hasVerifiedExecutionSuccess
+              && msg.contractAddress
+              && (
               <div className="pl-6">
                 <div className="mb-1 uppercase tracking-[0.08em]">Contract address</div>
                 <div className="flex items-center justify-between gap-2 break-all">
@@ -270,7 +469,10 @@ export default function Message({ msg, onConfirm, onCancel, onUpdateIntent, onWo
                 </div>
               </div>
             )}
-            {msg.derivedAddresses && msg.derivedAddresses.length > 0 && (
+            {hasVerifiedExecutionSuccess
+              && msg.derivedAddresses
+              && msg.derivedAddresses.length > 0
+              && (
               <div className="pl-6">
                 <div className="mb-1 uppercase tracking-[0.08em]">Generated addresses</div>
                 <div className="mb-2 text-[11px] normal-case text-text-muted">
@@ -292,10 +494,25 @@ export default function Message({ msg, onConfirm, onCancel, onUpdateIntent, onWo
                 </div>
               </div>
             )}
+            {msg.status === 'error' && msg.intent && msg.zeroRoundNoMajority && (
+              <div className="mt-2 rounded-[6px] border border-accent-warning/50 bg-accent-warning/10 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.06em] text-accent-warning">
+                Wallet retry blocked until the Studionet health gate clears.
+              </div>
+            )}
+            {msg.status === 'error' && msg.intent && !msg.zeroRoundNoMajority && (
+              <button
+                type="button"
+                onClick={handleRetry}
+                className="control-button mt-2 flex items-center justify-center gap-2 rounded-[6px] border-accent-danger px-3 py-2 font-mono text-[10px] uppercase tracking-[0.08em] text-accent-danger"
+              >
+                <RefreshCw size={12} />
+                Retry transaction
+              </button>
+            )}
           </div>
         )}
 
-        {!isUser && msg.status === 'error' && (
+        {!isUser && msg.status === 'error' && !msg.consensusTxId && !msg.txHash && (
           <div className="data-card mt-3 flex w-full flex-col gap-2 border-accent-danger/70 bg-accent-danger/10 p-3 font-mono text-[11px] text-accent-danger">
             <div className="flex items-center gap-2 font-bold uppercase tracking-[0.08em]">
               <AlertCircle size={14} />
@@ -306,7 +523,7 @@ export default function Message({ msg, onConfirm, onCancel, onUpdateIntent, onWo
             </div>
             {msg.intent ? (
               <button
-                onClick={() => onConfirm(msg.id)}
+                onClick={handleRetry}
                 className="control-button mt-2 flex items-center justify-center gap-2 rounded-[6px] border-accent-danger px-3 py-2 font-mono text-[10px] uppercase tracking-[0.08em] text-accent-danger"
               >
                 <RefreshCw size={12} />

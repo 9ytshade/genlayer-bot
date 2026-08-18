@@ -2,6 +2,7 @@
 
 import React from 'react';
 import type { AnyWorkflowConfig } from '@/types/WorkflowConfig';
+import type { WorkflowState } from '@/lib/api';
 import { ConditionalPaymentDashboard } from './ConditionalPaymentDashboard';
 import { EscrowDashboard } from './EscrowDashboard';
 import { SubscriptionDashboard } from './SubscriptionDashboard';
@@ -12,6 +13,8 @@ interface WorkflowPanelProps {
   contractAddress?: string;
   deploymentTxHash?: string;
   onAction?: (action: string, data?: unknown) => void;
+  state?: WorkflowState;
+  walletAddress?: string;
 }
 
 export function WorkflowPanel({
@@ -19,6 +22,8 @@ export function WorkflowPanel({
   contractAddress,
   deploymentTxHash,
   onAction,
+  state,
+  walletAddress,
 }: WorkflowPanelProps) {
   const handleAction = (action: string, data?: unknown) => {
     onAction?.(action, data);
@@ -31,8 +36,8 @@ export function WorkflowPanel({
           config={config}
           contractAddress={contractAddress}
           deploymentTxHash={deploymentTxHash}
-          onCancel={() => handleAction('cancel_contract')}
           onViewDetails={() => handleAction('view_details')}
+          state={state}
         />
       );
 
@@ -42,9 +47,11 @@ export function WorkflowPanel({
           config={config}
           contractAddress={contractAddress}
           deploymentTxHash={deploymentTxHash}
+          walletAddress={walletAddress}
           onApproveRelease={() => handleAction('approve_release')}
           onRaiseDispute={() => handleAction('raise_dispute')}
           onCancelEscrow={() => handleAction('cancel_escrow')}
+          state={state}
         />
       );
 
@@ -54,9 +61,12 @@ export function WorkflowPanel({
           config={config}
           contractAddress={contractAddress}
           deploymentTxHash={deploymentTxHash}
+          walletAddress={walletAddress}
+          onRecordPayment={() => handleAction('record_payment')}
           onPause={() => handleAction('pause')}
           onResume={() => handleAction('resume')}
           onCancel={() => handleAction('cancel_subscription')}
+          state={state}
         />
       );
 
@@ -66,9 +76,7 @@ export function WorkflowPanel({
           config={config}
           contractAddress={contractAddress}
           deploymentTxHash={deploymentTxHash}
-          onReviewSubmission={() => handleAction('review_submission')}
-          onSelectWinner={() => handleAction('select_winner')}
-          onCloseBounty={() => handleAction('close_bounty')}
+          state={state}
         />
       );
 

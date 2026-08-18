@@ -5,21 +5,32 @@ import MessageComponent from './Message';
 import CommandPalette from './CommandPalette';
 import LiveLogsPanel from './LiveLogsPanel';
 import { WorkflowEngine } from '@/services/WorkflowEngine';
-import type { Intent } from '../lib/api';
+import type { ConsensusStatusResult, Intent } from '../lib/api';
+import { getConsensusPresentation, shouldPollConsensus } from '../lib/consensusLifecycle.mjs';
 import {
   MessageData,
   sendMessage,
   confirmAction,
+  getConsensusStatus,
+  getConsensusReadiness,
+  getWorkflowState,
+  getNotaryRecord,
   buildTransferTx,
   buildDeployTx,
   buildWorkflowDeployTx,
   buildContractCallTx,
+  buildNotaryDeployTx,
+  buildNotaryCallTx,
   validateContractFile,
   getChatHistory,
   saveChatHistory,
   getStoredAuthToken,
   generateContract,
+  reviewWorkflowContract,
+  reviewNotaryBlueprint,
+  type WorkflowContractArtifact,
 } from '../lib/api';
+import type { NotaryBlueprintArtifact } from '@/types/Notary';
 import { Bot, X } from 'lucide-react';
 import ChatHeader from './ChatHeader';
 import ChatInput from './ChatInput';
@@ -27,12 +38,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useWallet } from '@/context/WalletContext';
 import { useChainId } from 'wagmi';
 import { DEFAULT_NETWORK, NETWORK_CONFIG, type NetworkKey } from '@/config';
-import { parseEther } from 'viem';
+import { formatEther, parseEther } from 'viem';
 
 import ChatSidebar, { type ChatSession } from './ChatSidebar';
 
 const STORAGE_KEY_PREFIX = 'genlayer-chat-history';
-const WELCOME_MESSAGE = "Hi! I'm your GenLayer AI assistant. You can check balances, send tokens, deploy contracts, or launch workflow contracts for conditional payments, escrow, subscriptions, and bounties. What would you like to do?";
+const WELCOME_MESSAGE = "Hi! I'm your GenLayer AI assistant. You can check balances, send tokens, deploy reviewed contracts, use deterministic escrow or subscription workflows, or notarize a public claim against web evidence. What would you like to do?";
 const HELP_MESSAGE = `Available commands:
 
 help - Show this command list.
@@ -40,12 +51,16 @@ check balance - Check the connected wallet balance on the selected GenLayer netw
 send tokens - Prepare a wallet-side GEN transfer. Example: Send 10 GEN to 0x...
 deploy contract - Start contract deployment. I will ask you to upload a .py GenLayer Intelligent Contract file.
 generate contract - Describe a contract in plain English and the AI will write and deploy it for you.
+notarize claim - Review a public claim against one to three HTTPS sources. Example: "Notarize whether GenLayer published docs using https://docs.genlayer.com/"
 
 WORKFLOW COMMANDS (require wallet addresses, not names):
-conditional payment - Pay when a condition is met. Example: "Pay 100 GEN to 0x... if ETH reaches 10000"
-escrow - Secure payment between two parties. Example: "Create escrow for 500 GEN between 0x... and 0x..."
-subscription - Recurring payments. Example: "Send 50 GEN weekly to 0x..."
-bounty - Reward for work. Example: "Create 1000 GEN bounty for landing page"
+escrow - Deterministic participant-controlled custody. Example: "Create escrow for 500 GEN between 0x... and 0x..."
+subscription - Deterministic recurring payment schedule. Example: "Send 50 GEN weekly to 0x..."
+
+UNAVAILABLE PENDING REBUILD:
+conditional payment - Evidence adjudication and settlement are disabled.
+bounty - Validator-based completion judgment and payout are disabled.
+appeal submission - Appealability can be inspected, but wallet preparation and submission are disabled.
 
 NOTE: All wallet transfers require Ethereum addresses (0x followed by 40 hex characters). Names are not supported.
 
@@ -73,9 +88,9 @@ const HELP_COMMANDS: NonNullable<MessageData['helpCommands']> = [
     description: 'Describe a contract and the AI will write, validate, and deploy it for you.',
   },
   {
-    label: 'Conditional Payment',
-    command: 'Pay 100 GEN to 0x',
-    description: 'Send payment when a specified condition is met. Requires recipient wallet address.',
+    label: 'AI Notary',
+    command: 'Notarize whether GenLayer published Intelligent Contracts documentation using https://docs.genlayer.com/',
+    description: 'Create a validator-reviewed public evidence record from one to three HTTPS sources.',
   },
   {
     label: 'Escrow',
@@ -86,11 +101,6 @@ const HELP_COMMANDS: NonNullable<MessageData['helpCommands']> = [
     label: 'Subscription',
     command: 'Send 50 GEN weekly to 0x',
     description: 'Set up recurring payments at specified intervals. Requires recipient wallet address.',
-  },
-  {
-    label: 'Bounty',
-    command: 'Create 1000 GEN bounty for ',
-    description: 'Offer a reward for completing a task or challenge.',
   },
   {
     label: 'New Chat',
@@ -197,23 +207,76 @@ function normalizeDeployIntentForUi(intent: Intent, fileName?: string): Intent {
   };
 }
 
-function buildWorkflowGeneratedContract(workflowConfig: NonNullable<MessageData['workflowConfig']>): NonNullable<MessageData['generatedContract']> {
-  const contractName = WorkflowEngine.getContractName(workflowConfig);
-  const code = WorkflowEngine.generateContractCode(workflowConfig);
+function buildWorkflowGeneratedContract(
+  workflowConfig: NonNullable<MessageData['workflowConfig']>,
+  artifact: WorkflowContractArtifact,
+): NonNullable<MessageData['generatedContract']> {
   return {
-    contractName,
-    contractType: workflowConfig.workflowType,
-    explanation: `Predefined ${workflowConfig.workflowType.replace(/_/g, ' ')} template configured from your request. You can copy/download this Python contract or deploy it directly.`,
-    code,
-    fileName: `${contractName}.py`,
+    contractName: artifact.contract_name,
+    contractType: artifact.contract_type,
+    explanation: artifact.explanation,
+    code: artifact.code,
+    fileName: artifact.file_name,
     specification: workflowConfig as unknown as Record<string, unknown>,
-    validation: {
-      valid: true,
-      message: 'Workflow contract template selected and configured.',
-      errors: [],
-      warnings: [],
-      contract_names: [contractName],
-    },
+    validation: artifact.validation,
+    sourceHash: artifact.source_hash,
+    sourceOrigin: artifact.source_origin,
+    pyGenlayerDependency: artifact.py_genlayer_dependency,
+    genlayerSdkVersion: artifact.genlayer_sdk_version,
+    generatorVersion: artifact.generator_version,
+    validatorVersion: artifact.validator_version,
+    compilerVersion: artifact.compiler_version,
+    artifactVersion: artifact.artifact_version,
+  };
+}
+
+function buildNotaryDeployIntent(
+  artifact: NotaryBlueprintArtifact,
+  claimantAddress: string,
+): Intent {
+  return {
+    action: 'deploy_contract',
+    code: artifact.code,
+    contract_name: artifact.contract_name,
+    contract_type: artifact.contract_type,
+    constructor_args: artifact.constructor_args,
+    constructor_kwargs: artifact.constructor_kwargs,
+    constructor_args_text: JSON.stringify(artifact.constructor_args, null, 2),
+    constructor_kwargs_text: '{}',
+    deploy_value: 0,
+    deploy_value_text: '0',
+    deploy_value_wei: '0',
+    gas_limit: null,
+    gas_limit_text: '',
+    consensus_max_rotations: null,
+    consensus_max_rotations_text: '',
+    leader_only: false,
+    source_file_name: artifact.file_name,
+    source_hash: artifact.source_hash,
+    source_origin: artifact.source_origin,
+    py_genlayer_dependency: artifact.py_genlayer_dependency,
+    genlayer_sdk_version: artifact.genlayer_sdk_version,
+    generator_version: artifact.generator_version,
+    validator_version: artifact.validator_version,
+    compiler_version: artifact.compiler_version,
+    artifact_version: artifact.artifact_version,
+    notary_operation: 'deploy_registry',
+    notary_spec: artifact.notary_spec,
+    claim_id: artifact.notary_spec.claim_id,
+    claimant_address: claimantAddress,
+  };
+}
+
+function getWorkflowFundingFields(workflowConfig: NonNullable<MessageData['workflowConfig']>): Pick<Intent, 'deploy_value_text' | 'deploy_value_wei'> {
+  const valueWei = workflowConfig.workflowType === 'bounty'
+    ? workflowConfig.rewardWei
+    : workflowConfig.workflowType === 'subscription'
+      ? '0'
+      : workflowConfig.amountWei;
+  const normalizedWei = valueWei || '0';
+  return {
+    deploy_value_text: formatEther(BigInt(normalizedWei)),
+    deploy_value_wei: normalizedWei,
   };
 }
 
@@ -489,6 +552,241 @@ export default function ChatInterface() {
     );
   };
 
+  const consensusPollTargets = useMemo(
+    () => messages
+      .filter((message) => (
+        message.role === 'bot'
+        && shouldPollConsensus(message)
+      ))
+      .map((message) => ({
+        id: message.id,
+        consensusTxId: (message.consensusTxId || message.txHash) as string,
+        txHash: message.txHash,
+        intent: message.intent,
+        network: message.consensusNetwork || selectedNetwork,
+        preparedTransactionId: message.preparedTransactionId,
+        intentHash: message.intentHash,
+      })),
+    [messages, selectedNetwork]
+  );
+
+  useEffect(() => {
+    if (
+      !isMounted
+      || !connectedWallet
+      || !getStoredAuthToken(connectedWallet)
+      || consensusPollTargets.length === 0
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    let pollDelay = 2500;
+    let pollTimer: number | undefined;
+
+    const updateConsensusMessage = (
+      messageId: string,
+      result?: ConsensusStatusResult,
+      requestError?: string
+    ) => {
+      setChats((prevChats) => {
+        let changed = false;
+        const nextChats = prevChats.map((chat) => ({
+          ...chat,
+          messages: chat.messages.map((message) => {
+            if (message.id !== messageId) {
+              return message;
+            }
+
+            if (requestError) {
+              if (message.consensusError === requestError) {
+                return message;
+              }
+              changed = true;
+              return { ...message, consensusError: requestError };
+            }
+
+            if (!result) {
+              return message;
+            }
+
+            const presentation = getConsensusPresentation(message.intent, result);
+            const nextContractAddress = presentation.exposeDeploymentAddresses
+              ? (result.contractAddress || message.contractAddress)
+              : message.intent?.notary_operation
+                ? (message.contractAddress || message.intent.contract_address)
+                : undefined;
+            const nextDerivedAddresses = presentation.exposeDeploymentAddresses
+              ? result.derivedAddresses
+              : undefined;
+            const currentDerivedAddresses = message.derivedAddresses || [];
+            const normalizedNextDerivedAddresses = nextDerivedAddresses || [];
+            const derivedAddressesUnchanged = (
+              currentDerivedAddresses.length === normalizedNextDerivedAddresses.length
+              && currentDerivedAddresses.every(
+                (address, index) => address === normalizedNextDerivedAddresses[index]
+              )
+            );
+            const isUnchanged = (
+              message.status === presentation.messageStatus
+              && message.consensusTxId === result.consensusTxId
+              && message.consensusStatus === result.status
+              && message.consensusStatusCode === result.statusCode
+              && message.executionStatus === result.executionStatus
+              && message.lifecycleStatus === result.lifecycleStatus
+              && message.evmStatus === (result.evmStatus || undefined)
+              && message.consensusFinal === result.final
+              && message.consensusAppealable === result.appealable
+              && message.consensusTerminal === result.terminal
+              && message.protocolResult === result.protocolResult
+              && message.consensusRounds === result.numRounds
+              && message.validatorCount === result.validatorCount
+              && message.voteCount === result.voteCount
+              && message.zeroRoundNoMajority === result.zeroRoundNoMajority
+              && message.contractAddress === nextContractAddress
+              && derivedAddressesUnchanged
+              && message.consensusError === undefined
+            );
+            if (isUnchanged) {
+              return message;
+            }
+
+            changed = true;
+            return {
+              ...message,
+              status: presentation.messageStatus,
+              consensusTxId: result.consensusTxId,
+              consensusStatus: result.status,
+              consensusStatusCode: result.statusCode,
+              executionStatus: result.executionStatus,
+              lifecycleStatus: result.lifecycleStatus,
+              evmStatus: result.evmStatus || undefined,
+              consensusFinal: result.final,
+              consensusAppealable: result.appealable,
+              consensusTerminal: result.terminal,
+              protocolResult: result.protocolResult,
+              consensusRounds: result.numRounds,
+              validatorCount: result.validatorCount,
+              voteCount: result.voteCount,
+              zeroRoundNoMajority: result.zeroRoundNoMajority,
+              consensusError: undefined,
+              contractAddress: nextContractAddress,
+              derivedAddresses: nextDerivedAddresses,
+              content: presentation.content,
+            };
+          }),
+        }));
+
+        return changed ? nextChats : prevChats;
+      });
+    };
+
+    const pollConsensus = async () => {
+      await Promise.all(consensusPollTargets.map(async (target) => {
+        try {
+          const result = await getConsensusStatus(
+            target.consensusTxId,
+            connectedWallet,
+            target.network,
+            target.intent,
+            target.txHash,
+            target.preparedTransactionId,
+            target.intentHash
+          );
+          if (!cancelled) {
+            updateConsensusMessage(target.id, result);
+            const notaryOperation = target.intent?.notary_operation;
+            const notaryContractAddress = target.intent?.contract_address;
+            if (
+              notaryOperation
+              && notaryOperation !== 'deploy_registry'
+              && notaryContractAddress
+              && target.intent?.claim_id
+              && result.final
+              && result.executionStatus === 'FINISHED_WITH_RETURN'
+            ) {
+              try {
+                const notaryResponse = await getNotaryRecord(
+                  notaryContractAddress,
+                  target.intent.claim_id,
+                  connectedWallet,
+                  target.network,
+                );
+                if (!cancelled) {
+                  setChats((prevChats) => prevChats.map((chat) => ({
+                    ...chat,
+                    messages: chat.messages.map((message) => (
+                      message.id === target.id
+                        ? { ...message, notaryRecord: notaryResponse.record, contractAddress: notaryContractAddress }
+                        : message
+                    )),
+                  })));
+                }
+              } catch {
+                // The finalized transaction remains visible; record reads can be retried from the panel.
+              }
+            }
+
+            const workflowContractAddress = !notaryOperation && target.intent?.action === 'deploy_contract'
+              ? result.contractAddress
+              : !notaryOperation && target.intent?.action === 'contract_call'
+                ? target.intent.contract_address
+                : undefined;
+            if (
+              workflowContractAddress
+              && result.final
+              && result.executionStatus === 'FINISHED_WITH_RETURN'
+            ) {
+              try {
+                const workflowState = await getWorkflowState(
+                  workflowContractAddress,
+                  connectedWallet,
+                  target.network,
+                );
+                setChats((prevChats) => prevChats.map((chat) => ({
+                  ...chat,
+                  messages: chat.messages.map((message) => (
+                    message.contractAddress?.toLowerCase() === workflowContractAddress.toLowerCase()
+                      ? { ...message, workflowState }
+                      : message
+                  )),
+                })));
+              } catch {
+                // Keep lifecycle state visible; contract-state reads retry on demand.
+              }
+            }
+          }
+        } catch (error) {
+          if (!cancelled) {
+            updateConsensusMessage(
+              target.id,
+              undefined,
+              error instanceof Error ? error.message : 'Unable to read consensus status.'
+            );
+          }
+        }
+      }));
+
+      if (!cancelled) {
+        pollDelay = Math.min(Math.round(pollDelay * 1.6), 15000);
+        pollTimer = window.setTimeout(() => {
+          void pollConsensus();
+        }, pollDelay);
+      }
+    };
+
+    pollTimer = window.setTimeout(() => {
+      void pollConsensus();
+    }, 800);
+
+    return () => {
+      cancelled = true;
+      if (pollTimer !== undefined) {
+        window.clearTimeout(pollTimer);
+      }
+    };
+  }, [connectedWallet, consensusPollTargets, isMounted]);
+
   const handleCreateNewChat = () => {
     const nextChat = createChatSession();
     setChats((prevChats) => [nextChat, ...prevChats]);
@@ -577,7 +875,7 @@ export default function ChatInterface() {
       setIsLoading(true);
 
       try {
-        const validation = await validateContractFile(content, file.name);
+        const validation = await validateContractFile(content, file.name, connectedWallet ?? undefined);
         if (!validation.valid) {
           const details = [...validation.errors, ...validation.warnings].join('\n');
           const botMsg: MessageData = {
@@ -590,10 +888,29 @@ export default function ChatInterface() {
           appendMessagesToCurrentChat(botMsg);
           return;
         }
+        if (
+          !validation.source_hash
+          || !validation.py_genlayer_dependency
+          || !validation.generator_version
+          || !validation.validator_version
+        ) {
+          throw new Error('Contract validation did not return immutable source metadata.');
+        }
 
         const response = await sendMessage(deployCmd, connectedWallet ?? undefined, selectedNetwork);
         const normalizedIntent = response.intent && response.intent.action === 'deploy_contract'
-          ? normalizeDeployIntentForUi({ ...(response.intent as Intent), code: content }, file.name)
+          ? normalizeDeployIntentForUi({
+              ...(response.intent as Intent),
+              code: content,
+              source_hash: validation.source_hash,
+              source_origin: 'uploaded',
+              py_genlayer_dependency: validation.py_genlayer_dependency,
+              genlayer_sdk_version: validation.genlayer_sdk_version,
+              generator_version: validation.generator_version,
+              validator_version: validation.validator_version,
+              compiler_version: validation.compiler_version,
+              artifact_version: validation.artifact_version,
+            }, file.name)
           : {
               action: 'deploy_contract',
               code: content,
@@ -605,6 +922,14 @@ export default function ChatInterface() {
               gas_limit_text: '',
               consensus_max_rotations_text: '',
               leader_only: false,
+              source_hash: validation.source_hash,
+              source_origin: 'uploaded',
+              py_genlayer_dependency: validation.py_genlayer_dependency,
+              genlayer_sdk_version: validation.genlayer_sdk_version,
+              generator_version: validation.generator_version,
+              validator_version: validation.validator_version,
+              compiler_version: validation.compiler_version,
+              artifact_version: validation.artifact_version,
             } satisfies Intent;
         const botMsg: MessageData = {
           id: (Date.now() + 1).toString(),
@@ -645,6 +970,14 @@ export default function ChatInterface() {
     if (!connectedWallet || !command.trim() || isLoading || isNetworkMismatch) return;
 
     const trimmedInput = command.trim();
+    const latestMessage = messages[messages.length - 1];
+    const pendingNotarySpec = (
+      latestMessage?.role === 'bot'
+      && latestMessage.status === 'awaiting_input'
+      && latestMessage.intent?.action === 'notarize_claim'
+    )
+      ? latestMessage.intent.notary_spec
+      : undefined;
     const userMsg: MessageData = {
       id: Date.now().toString(),
       role: 'user',
@@ -707,6 +1040,14 @@ export default function ChatInterface() {
             gas_limit_text: '',
             consensus_max_rotations_text: '',
             leader_only: false,
+            source_hash: generated.source_hash,
+            source_origin: generated.source_origin,
+            py_genlayer_dependency: generated.py_genlayer_dependency,
+            genlayer_sdk_version: generated.genlayer_sdk_version,
+            generator_version: generated.generator_version,
+            validator_version: generated.validator_version,
+            compiler_version: generated.compiler_version,
+            artifact_version: generated.artifact_version,
           },
           fileName
         );
@@ -731,6 +1072,14 @@ export default function ChatInterface() {
               warnings: generated.warnings,
               contract_names: [generated.contract_name],
             },
+            sourceHash: generated.source_hash,
+            sourceOrigin: generated.source_origin,
+            pyGenlayerDependency: generated.py_genlayer_dependency,
+            genlayerSdkVersion: generated.genlayer_sdk_version,
+            generatorVersion: generated.generator_version,
+            validatorVersion: generated.validator_version,
+            compilerVersion: generated.compiler_version,
+            artifactVersion: generated.artifact_version,
           },
           status: 'awaiting_confirmation',
         });
@@ -767,23 +1116,80 @@ export default function ChatInterface() {
         return;
       }
 
-      const summary = WorkflowEngine.getWorkflowSummary(workflowParse.config);
-      appendMessagesToCurrentChat({
-        id: (Date.now() + 1).toString(),
-        role: 'bot',
-        content: `Workflow ready for deployment.\n\n${summary}\n\nI selected the predefined ${WorkflowEngine.getContractName(workflowParse.config)} template and configured it from your request. Confirm to deploy it through your wallet.`,
-        intent: workflowParse.intent,
-        workflowConfig: workflowParse.config,
-        generatedContract: buildWorkflowGeneratedContract(workflowParse.config),
-        status: 'awaiting_confirmation',
-      });
+      setIsLoading(true);
+      try {
+        const artifact = await reviewWorkflowContract(workflowParse.config, connectedWallet);
+        const reviewedIntent: Intent = {
+          ...workflowParse.intent,
+          ...getWorkflowFundingFields(artifact.workflow_config),
+          source_hash: artifact.source_hash,
+          source_origin: artifact.source_origin,
+          py_genlayer_dependency: artifact.py_genlayer_dependency,
+          genlayer_sdk_version: artifact.genlayer_sdk_version,
+          generator_version: artifact.generator_version,
+          validator_version: artifact.validator_version,
+          compiler_version: artifact.compiler_version,
+          artifact_version: artifact.artifact_version,
+        };
+        const summary = WorkflowEngine.getWorkflowSummary(artifact.workflow_config);
+        appendMessagesToCurrentChat({
+          id: (Date.now() + 1).toString(),
+          role: 'bot',
+          content: `Workflow ready for deployment.\n\n${summary}\n\nReview the canonical backend-generated ${artifact.contract_name} source and confirm to deploy it through your wallet.`,
+          intent: reviewedIntent,
+          workflowConfig: artifact.workflow_config,
+          generatedContract: buildWorkflowGeneratedContract(artifact.workflow_config, artifact),
+          status: 'awaiting_confirmation',
+        });
+      } catch (error) {
+        appendMessagesToCurrentChat({
+          id: (Date.now() + 1).toString(),
+          role: 'bot',
+          content: error instanceof Error ? error.message : 'Failed to review canonical workflow source.',
+          status: 'error',
+        });
+      } finally {
+        setIsLoading(false);
+      }
       return;
     }
 
     setIsLoading(true);
 
     try {
-      const response = await sendMessage(userMsg.content, connectedWallet ?? undefined, selectedNetwork);
+      const response = await sendMessage(
+        userMsg.content,
+        connectedWallet ?? undefined,
+        selectedNetwork,
+        pendingNotarySpec,
+      );
+
+      if (response.intent?.action === 'notarize_claim') {
+        if (response.status !== 'awaiting_confirmation') {
+          appendMessagesToCurrentChat({
+            id: (Date.now() + 1).toString(),
+            role: 'bot',
+            content: response.content || 'The AI Notary blueprint needs a claim and one to three public HTTPS sources.',
+            intent: response.intent,
+            status: response.status || 'awaiting_input',
+          });
+          return;
+        }
+        if (!response.intent.notary_spec) {
+          throw new Error('The AI Notary request did not include a reviewable evidence specification.');
+        }
+        const artifact = await reviewNotaryBlueprint(response.intent.notary_spec, connectedWallet);
+        const notaryIntent = buildNotaryDeployIntent(artifact, connectedWallet);
+        appendMessagesToCurrentChat({
+          id: (Date.now() + 1).toString(),
+          role: 'bot',
+          content: response.content || 'AI Notary blueprint ready for review.',
+          intent: notaryIntent,
+          notaryBlueprint: artifact,
+          status: 'awaiting_confirmation',
+        });
+        return;
+      }
       
       // Check if this is a workflow intent
       const isWorkflowIntent = response.intent && WorkflowEngine.detectWorkflow(response.intent);
@@ -792,12 +1198,28 @@ export default function ChatInterface() {
       // If it's a workflow intent, build and validate the configuration
       let workflowContent = response.content || 'An error occurred.';
       let workflowConfig: MessageData['workflowConfig'] | undefined = undefined;
+      let workflowArtifact: WorkflowContractArtifact | undefined;
+      let reviewedIntent = response.intent;
       if (isWorkflowIntent && response.intent) {
         workflowConfig = WorkflowEngine.buildWorkflowConfig(response.intent) || undefined;
         if (workflowConfig) {
           const validation = WorkflowEngine.validateConfig(workflowConfig);
           if (validation.valid) {
-            const summary = WorkflowEngine.getWorkflowSummary(workflowConfig);
+            workflowArtifact = await reviewWorkflowContract(workflowConfig, connectedWallet);
+            workflowConfig = workflowArtifact.workflow_config;
+            reviewedIntent = {
+              ...response.intent,
+              ...getWorkflowFundingFields(workflowArtifact.workflow_config),
+              source_hash: workflowArtifact.source_hash,
+              source_origin: workflowArtifact.source_origin,
+              py_genlayer_dependency: workflowArtifact.py_genlayer_dependency,
+              genlayer_sdk_version: workflowArtifact.genlayer_sdk_version,
+              generator_version: workflowArtifact.generator_version,
+              validator_version: workflowArtifact.validator_version,
+              compiler_version: workflowArtifact.compiler_version,
+              artifact_version: workflowArtifact.artifact_version,
+            };
+            const summary = WorkflowEngine.getWorkflowSummary(workflowArtifact.workflow_config);
             workflowContent = `${response.content || 'Workflow ready for deployment'}\n\n${summary}`;
           } else {
             workflowContent = `Configuration error: ${validation.errors.join(', ')}`;
@@ -809,9 +1231,12 @@ export default function ChatInterface() {
         id: (Date.now() + 1).toString(),
         role: 'bot',
         content: workflowContent,
-        intent: response.intent,
+        intent: reviewedIntent,
         workflowConfig: workflowConfig || undefined,
-        generatedContract: workflowConfig ? buildWorkflowGeneratedContract(workflowConfig) : response.generatedContract,
+        generatedContract: workflowArtifact
+          ? buildWorkflowGeneratedContract(workflowArtifact.workflow_config, workflowArtifact)
+          : response.generatedContract,
+        contractReview: response.contractReview,
         simulation: response.simulation,
         status: workflowStatus
       };
@@ -832,6 +1257,15 @@ export default function ChatInterface() {
     }
   };
 
+  const assertConsensusReady = async () => {
+    if (selectedNetwork !== 'studionet' || !connectedWallet) return;
+    const readiness = await getConsensusReadiness(connectedWallet, selectedNetwork);
+    if (!readiness.ready) {
+      const retry = readiness.retryAfterSeconds ? ' Retry after about ' + Math.ceil(readiness.retryAfterSeconds / 60) + ' minutes.' : '';
+      throw new Error((readiness.message || 'Studionet is not ready for a consensus transaction.') + retry);
+    }
+  };
+
   const handleConfirm = async (msgId: string) => {
     const msg = messages.find(m => m.id === msgId);
     if (!msg || !msg.intent) return;
@@ -846,14 +1280,113 @@ export default function ChatInterface() {
 
     try {
       const intent = msg.intent;
+      if (
+        selectedNetwork === 'studionet'
+        && !['transfer', 'appeal_transaction', 'check_balance'].includes(intent.action)
+      ) {
+        await assertConsensusReady();
+      }
       let intentForConfirmation = intent;
       let txHash: string | undefined = undefined;
+      let preparedTransactionId: string | undefined;
+      let intentHash: string | undefined;
+
+      // A wallet broadcast can succeed before backend verification completes.
+      // Reconcile the reviewed transaction hash instead of broadcasting again.
+      if (msg.txHash && msg.preparedTransactionId && msg.intentHash) {
+        const result = await confirmAction(
+          intent,
+          connectedWallet,
+          undefined,
+          msg.txHash,
+          selectedNetwork,
+          msg.preparedTransactionId,
+          msg.intentHash,
+        );
+        if (!result.error) {
+          refreshBalance();
+        }
+        replaceMessageInCurrentChat(msgId, (message) => ({
+          ...message,
+          status: result.error ? 'error' : 'success',
+          txHash: result.txHash || msg.txHash,
+          consensusTxId: intent.action === 'transfer' ? undefined : message.consensusTxId,
+          consensusStatus: intent.action === 'transfer' ? undefined : message.consensusStatus,
+          consensusTerminal: intent.action === 'transfer' ? true : message.consensusTerminal,
+          zeroRoundNoMajority: intent.action === 'transfer' ? false : message.zeroRoundNoMajority,
+          preparedTransactionId: result.preparedTransactionId || msg.preparedTransactionId,
+          intentHash: result.intentHash || msg.intentHash,
+          transactionDiagnostics: result.transactionDiagnostics,
+          content: result.error
+            ? 'Execution verification failed: ' + result.error
+            : result.content || 'Transaction successfully verified on GenLayer.',
+        }));
+        return;
+      }
 
       const workflowType = WorkflowEngine.detectWorkflow(intent);
-      if (workflowType) {
+      if (intent.notary_operation === 'deploy_registry') {
+        const artifact = msg.notaryBlueprint;
+        if (!artifact || !intent.notary_spec) {
+          throw new Error('AI Notary blueprint must be reviewed again before deployment.');
+        }
+        if (
+          intent.source_origin !== 'notary'
+          || !intent.source_hash
+          || !intent.py_genlayer_dependency
+          || !intent.generator_version
+          || !intent.validator_version
+        ) {
+          throw new Error('AI Notary source metadata is incomplete. Review the blueprint again.');
+        }
+        const txData = await buildNotaryDeployTx(
+          {
+            notary_spec: artifact.notary_spec,
+            intent,
+            gas_limit: intent.gas_limit as number | null,
+            consensus_max_rotations: intent.consensus_max_rotations as number | null,
+            leader_only: Boolean(intent.leader_only),
+            source_hash: intent.source_hash,
+            py_genlayer_dependency: intent.py_genlayer_dependency,
+            generator_version: intent.generator_version,
+            validator_version: intent.validator_version,
+          },
+          connectedWallet,
+          selectedNetwork,
+        );
+        if (txData.sourceHash !== artifact.source_hash || txData.code !== artifact.code) {
+          throw new Error('Backend AI Notary source changed after review. Review the current blueprint before deploying.');
+        }
+        if (txData.value !== BigInt(0)) {
+          throw new Error('AI Notary registry deployment must have zero attached value.');
+        }
+        txHash = await sendTransaction({
+          to: txData.to,
+          data: txData.data,
+          value: txData.value,
+          chainId: txData.chainId,
+          nonce: txData.nonce,
+          gas: txData.gas,
+          gasPrice: txData.gasPrice,
+          maxFeePerGas: txData.maxFeePerGas,
+          maxPriorityFeePerGas: txData.maxPriorityFeePerGas,
+        });
+        intentForConfirmation = txData.preparedIntent;
+        preparedTransactionId = txData.preparedTransactionId;
+        intentHash = txData.intentHash;
+      } else if (workflowType) {
         const workflowConfig = msg.workflowConfig || WorkflowEngine.buildWorkflowConfig(intent);
         if (!workflowConfig) {
           throw new Error(`Failed to build workflow configuration for ${workflowType}`);
+        }
+        if (
+          !intent.source_hash
+          || intent.source_origin !== 'workflow'
+          || !intent.py_genlayer_dependency
+          || !intent.generator_version
+          || !intent.validator_version
+        ) {
+          throw new Error('Workflow source must be reviewed again before deployment.');
         }
 
         const validation = WorkflowEngine.validateConfig(workflowConfig);
@@ -864,14 +1397,22 @@ export default function ChatInterface() {
         const txData = await buildWorkflowDeployTx(
           {
             workflow_config: workflowConfig,
+            intent,
             deploy_value_wei: '0',
             gas_limit: null,
             consensus_max_rotations: null,
             leader_only: false,
+            source_hash: intent.source_hash,
+            py_genlayer_dependency: intent.py_genlayer_dependency,
+            generator_version: intent.generator_version,
+            validator_version: intent.validator_version,
           },
           connectedWallet as string,
           selectedNetwork
         );
+        if (txData.sourceHash !== intent.source_hash) {
+          throw new Error('Backend workflow source changed after review. Review the current source before deploying.');
+        }
 
         const deployIntent: Intent = {
           action: 'deploy_contract',
@@ -880,10 +1421,9 @@ export default function ChatInterface() {
           contract_type: txData.workflowConfig.workflowType,
           constructor_args: txData.constructorArgs,
           constructor_kwargs: txData.constructorKwargs,
-          deploy_value: 0,
+          ...getWorkflowFundingFields(txData.workflowConfig),
           constructor_args_text: JSON.stringify(txData.constructorArgs, null, 2),
           constructor_kwargs_text: '{}',
-          deploy_value_text: '0',
           source_file_name: `${txData.contractName}.py`,
           gas_limit: null,
           gas_limit_text: '',
@@ -891,6 +1431,14 @@ export default function ChatInterface() {
           consensus_max_rotations_text: '',
           leader_only: false,
           workflow_config: txData.workflowConfig,
+          source_hash: txData.sourceHash,
+          source_origin: txData.sourceOrigin,
+          py_genlayer_dependency: txData.pyGenlayerDependency,
+          genlayer_sdk_version: txData.genlayerSdkVersion,
+          generator_version: txData.generatorVersion,
+          validator_version: txData.validatorVersion,
+          compiler_version: txData.compilerVersion,
+          artifact_version: txData.artifactVersion,
         };
 
         txHash = await sendTransaction({
@@ -906,12 +1454,24 @@ export default function ChatInterface() {
         });
 
         intentForConfirmation = deployIntent;
+        preparedTransactionId = txData.preparedTransactionId;
+        intentHash = txData.intentHash;
+      } else if (intent.action === 'appeal_transaction') {
+        throw new Error(
+          'Appeal submission is unavailable until a real appeal round and post-window finality are proven on Studionet.',
+        );
       } else if (intent.action === 'transfer') {
         // For transfers and deployments, let the user's wallet broadcast the transaction.
         if (!intent.recipient || typeof intent.amount !== 'number') {
           throw new Error('Transfer intent is missing recipient or amount.');
         }
-        const txData = await buildTransferTx(intent.recipient, intent.amount, connectedWallet as string, selectedNetwork);
+        const txData = await buildTransferTx(
+          intent.recipient,
+          intent.amount,
+          connectedWallet as string,
+          selectedNetwork,
+          intent
+        );
         txHash = await sendTransaction({
           to: txData.to,
           value: txData.value,
@@ -920,26 +1480,48 @@ export default function ChatInterface() {
           nonce: txData.nonce,
           gas: txData.gas,
           gasPrice: txData.gasPrice,
+          maxFeePerGas: txData.maxFeePerGas,
+          maxPriorityFeePerGas: txData.maxPriorityFeePerGas,
         });
+        preparedTransactionId = txData.preparedTransactionId;
+        intentHash = txData.intentHash;
       } else if (intent.action === 'deploy_contract') {
         if (!intent.code) {
           throw new Error('Deployment intent is missing contract code.');
+        }
+        if (
+          !intent.source_hash
+          || !intent.source_origin
+          || !intent.py_genlayer_dependency
+          || !intent.generator_version
+          || !intent.validator_version
+        ) {
+          throw new Error('Contract source must be generated or validated again before deployment.');
         }
         const deployIntent = parseDeployIntent(intent);
         intentForConfirmation = deployIntent;
         const txData = await buildDeployTx(
           {
             code: deployIntent.code as string,
+            intent: deployIntent,
             constructor_args: deployIntent.constructor_args,
             constructor_kwargs: deployIntent.constructor_kwargs as Record<string, unknown>,
             deploy_value_wei: deployIntent.deploy_value_wei as string,
             gas_limit: deployIntent.gas_limit as number | null,
             consensus_max_rotations: deployIntent.consensus_max_rotations as number | null,
             leader_only: deployIntent.leader_only as boolean,
+            source_hash: deployIntent.source_hash as string,
+            source_origin: deployIntent.source_origin as 'generated' | 'uploaded',
+            py_genlayer_dependency: deployIntent.py_genlayer_dependency as string,
+            generator_version: deployIntent.generator_version as string,
+            validator_version: deployIntent.validator_version as string,
           },
           connectedWallet as string,
           selectedNetwork
         );
+        if (txData.sourceHash !== deployIntent.source_hash) {
+          throw new Error('Backend deployment source does not match the reviewed source hash.');
+        }
         txHash = await sendTransaction({
           to: txData.to,
           data: txData.data,
@@ -951,18 +1533,40 @@ export default function ChatInterface() {
           maxFeePerGas: txData.maxFeePerGas,
           maxPriorityFeePerGas: txData.maxPriorityFeePerGas,
         });
+        preparedTransactionId = txData.preparedTransactionId;
+        intentHash = txData.intentHash;
       }
 
-      const result = await confirmAction(intentForConfirmation, connectedWallet, undefined, txHash, selectedNetwork);
+      const result = await confirmAction(
+        intentForConfirmation,
+        connectedWallet,
+        undefined,
+        txHash,
+        selectedNetwork,
+        preparedTransactionId,
+        intentHash
+      );
       if (!result.error) {
         refreshBalance();
       }
       replaceMessageInCurrentChat(msgId, (message) => ({
           ...message,
-          status: result.error ? 'error' : 'success',
+          status: result.error
+            ? 'error'
+            : ['deploy_contract', 'contract_call'].includes(intentForConfirmation.action)
+              ? 'submitted'
+              : 'success',
           intent: intentForConfirmation,
-          txHash: result.txHash,
-          consensusTxId: result.consensusTxId,
+          txHash: result.txHash || txHash,
+          transactionDiagnostics: result.transactionDiagnostics,
+          consensusTxId: result.consensusTxId || result.txHash || txHash,
+          consensusStatus: result.consensusStatus,
+          executionStatus: result.executionStatus,
+          lifecycleStatus: result.lifecycleStatus,
+          evmStatus: result.evmStatus,
+          consensusNetwork: selectedNetwork,
+          preparedTransactionId: result.preparedTransactionId || preparedTransactionId,
+          intentHash: result.intentHash || intentHash,
           contractAddress: result.contractAddress,
           derivedAddresses: result.derivedAddresses,
           content: result.error
@@ -974,6 +1578,153 @@ export default function ChatInterface() {
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Network error during execution.';
       replaceMessageInCurrentChat(msgId, (message) => ({ ...message, status: 'error', content: errorMessage }));
+    }
+  };
+
+  const handleNotaryAction = async (
+    msgId: string,
+    action: 'submit_claim' | 'evaluate_claim' | 'refresh',
+  ) => {
+    const msg = messages.find((message) => message.id === msgId);
+    if (!msg?.notaryBlueprint || !msg.intent) {
+      return;
+    }
+    if (!connectedWallet) {
+      replaceMessageInCurrentChat(msgId, (message) => ({
+        ...message,
+        status: 'error',
+        content: 'Wallet not connected',
+      }));
+      return;
+    }
+
+    const contractAddress = msg.contractAddress || msg.intent.contract_address;
+    const claimId = msg.notaryBlueprint.notary_spec.claim_id;
+    if (!contractAddress) {
+      replaceMessageInCurrentChat(msgId, (message) => ({
+        ...message,
+        status: 'error',
+        content: 'The AI Notary registry must finalize before a claim can be submitted.',
+      }));
+      return;
+    }
+
+    if (action === 'refresh') {
+      try {
+        const response = await getNotaryRecord(
+          contractAddress,
+          claimId,
+          connectedWallet,
+          selectedNetwork,
+        );
+        replaceMessageInCurrentChat(msgId, (message) => ({
+          ...message,
+          notaryRecord: response.record,
+          contractAddress,
+        }));
+      } catch (error) {
+        appendMessagesToCurrentChat({
+          id: Date.now().toString(),
+          role: 'bot',
+          content: error instanceof Error ? error.message : 'Unable to refresh the finalized AI Notary record.',
+          status: 'error',
+        });
+      }
+      return;
+    }
+
+    const actionIntent: Intent = {
+      action: 'contract_call',
+      contract_address: contractAddress,
+      method: action,
+      args: [claimId],
+      kwargs: {},
+      notary_operation: action,
+      notary_spec: msg.notaryBlueprint.notary_spec,
+      claim_id: claimId,
+      claimant_address: connectedWallet,
+    };
+
+    replaceMessageInCurrentChat(msgId, (message) => ({
+      ...message,
+      status: 'executing',
+      intent: actionIntent,
+      txHash: undefined,
+      consensusTxId: undefined,
+      consensusStatus: undefined,
+      consensusStatusCode: undefined,
+      executionStatus: undefined,
+      consensusFinal: undefined,
+      consensusAppealable: undefined,
+      consensusTerminal: undefined,
+      consensusError: undefined,
+      preparedTransactionId: undefined,
+      intentHash: undefined,
+    }));
+
+    try {
+      const txData = await buildNotaryCallTx(
+        {
+          contract_address: contractAddress,
+          notary_action: action,
+          claim_id: claimId,
+          notary_spec: action === 'submit_claim' ? msg.notaryBlueprint.notary_spec : undefined,
+          intent: actionIntent,
+        },
+        connectedWallet,
+        selectedNetwork,
+      );
+      if (txData.value !== BigInt(0)) {
+        throw new Error('AI Notary actions must have zero attached value.');
+      }
+      await assertConsensusReady();
+      const txHash = await sendTransaction({
+        to: txData.to,
+        data: txData.data,
+        value: txData.value,
+        chainId: txData.chainId,
+        nonce: txData.nonce,
+        gas: txData.gas,
+        gasPrice: txData.gasPrice,
+        maxFeePerGas: txData.maxFeePerGas,
+        maxPriorityFeePerGas: txData.maxPriorityFeePerGas,
+      });
+      const result = await confirmAction(
+        txData.preparedIntent,
+        connectedWallet,
+        undefined,
+        txHash,
+        selectedNetwork,
+        txData.preparedTransactionId,
+        txData.intentHash,
+      );
+      if (!result.error) {
+        refreshBalance();
+      }
+      replaceMessageInCurrentChat(msgId, (message) => ({
+        ...message,
+        status: result.error ? 'error' : 'submitted',
+        intent: txData.preparedIntent,
+        txHash: result.txHash || txHash,
+        transactionDiagnostics: result.transactionDiagnostics,
+        consensusTxId: result.consensusTxId || result.txHash || txHash,
+        consensusStatus: result.consensusStatus,
+        consensusNetwork: selectedNetwork,
+        preparedTransactionId: result.preparedTransactionId || txData.preparedTransactionId,
+        intentHash: result.intentHash || txData.intentHash,
+        contractAddress,
+        content: result.error
+          ? `AI Notary action failed: ${result.error}`
+          : result.content || (action === 'submit_claim'
+            ? 'AI Notary claim submitted to GenLayer consensus.'
+            : 'AI Notary evidence evaluation submitted to GenLayer consensus.'),
+      }));
+    } catch (error) {
+      replaceMessageInCurrentChat(msgId, (message) => ({
+        ...message,
+        status: 'error',
+        content: error instanceof Error ? error.message : 'AI Notary action failed.',
+      }));
     }
   };
 
@@ -993,19 +1744,22 @@ export default function ChatInterface() {
       return;
     }
 
-    const methodMap: Record<string, { method: string; nextStatus?: string; promptLabel?: string }> = {
-      cancel_contract: { method: 'cancel_contract', nextStatus: 'cancelled' },
+    const methodMap: Record<string, { method: string; promptLabel?: string }> = {
+      fund: { method: 'fund' },
+      request_evaluation: { method: 'request_evaluation' },
+      settle_release: { method: 'settle_release' },
+      settle_refund: { method: 'settle_refund' },
       view_details: { method: 'status' },
-      approve_release: { method: 'approve_release', nextStatus: 'completed' },
-      raise_dispute: { method: 'raise_dispute', nextStatus: 'disputed' },
-      cancel_escrow: { method: 'cancel_escrow', nextStatus: 'cancelled' },
-      pause: { method: 'pause', nextStatus: 'paused' },
-      resume: { method: 'resume', nextStatus: 'active' },
-      cancel_subscription: { method: 'cancel', nextStatus: 'cancelled' },
-      record_payment: { method: 'record_payment', nextStatus: 'active' },
+      approve_release: { method: 'approve_release' },
+      raise_dispute: { method: 'raise_dispute' },
+      cancel_escrow: { method: 'cancel_escrow' },
+      pause: { method: 'pause' },
+      resume: { method: 'resume' },
+      cancel_subscription: { method: 'cancel' },
+      record_payment: { method: 'record_payment', promptLabel: 'Payment reference' },
       review_submission: { method: 'review_submission', promptLabel: 'Submitter wallet address' },
-      select_winner: { method: 'select_winner', nextStatus: 'completed', promptLabel: 'Winner wallet address' },
-      close_bounty: { method: 'close_bounty', nextStatus: 'completed' },
+      select_winner: { method: 'select_winner', promptLabel: 'Winner wallet address' },
+      close_bounty: { method: 'close_bounty' },
     };
     const actionConfig = methodMap[action];
     if (!actionConfig) {
@@ -1019,12 +1773,17 @@ export default function ChatInterface() {
     }
 
     if (actionConfig.method === 'status') {
-      appendMessagesToCurrentChat({
-        id: Date.now().toString(),
-        role: 'bot',
-        content: `Workflow contract: ${msg.contractAddress}`,
-        status: 'success',
-      });
+      try {
+        const workflowState = await getWorkflowState(msg.contractAddress, connectedWallet, selectedNetwork);
+        replaceMessageInCurrentChat(msgId, (message) => ({ ...message, workflowState }));
+      } catch (error) {
+        appendMessagesToCurrentChat({
+          id: Date.now().toString(),
+          role: 'bot',
+          content: error instanceof Error ? error.message : 'Unable to read finalized workflow state.',
+          status: 'error',
+        });
+      }
       return;
     }
 
@@ -1037,20 +1796,20 @@ export default function ChatInterface() {
       args.push(value.trim());
     }
 
+    const intent: Intent = {
+      action: 'contract_call',
+      contract_address: msg.contractAddress,
+      method: actionConfig.method,
+      args,
+      kwargs: {},
+      workflow_type: msg.workflowConfig.workflowType,
+    };
     const actionMessageId = Date.now().toString();
     appendMessagesToCurrentChat({
       id: actionMessageId,
       role: 'bot',
       content: `Preparing workflow action '${actionConfig.method}' for wallet signature.`,
-      intent: {
-        action: 'contract_call',
-        contract_address: msg.contractAddress,
-        method: actionConfig.method,
-        args,
-        kwargs: {},
-        workflow_type: msg.workflowConfig.workflowType,
-        next_status: actionConfig.nextStatus,
-      },
+      intent,
       status: 'executing',
     });
 
@@ -1059,6 +1818,7 @@ export default function ChatInterface() {
         {
           contract_address: msg.contractAddress,
           method: actionConfig.method,
+          intent,
           args,
           kwargs: {},
           value_wei: '0',
@@ -1067,6 +1827,7 @@ export default function ChatInterface() {
         connectedWallet as string,
         selectedNetwork
       );
+      await assertConsensusReady();
       const txHash = await sendTransaction({
         to: txData.to,
         data: txData.data,
@@ -1079,25 +1840,29 @@ export default function ChatInterface() {
         maxPriorityFeePerGas: txData.maxPriorityFeePerGas,
       });
 
-      const intent: Intent = {
-        action: 'contract_call',
-        contract_address: msg.contractAddress,
-        method: actionConfig.method,
-        args,
-        kwargs: {},
-        workflow_type: msg.workflowConfig.workflowType,
-        next_status: actionConfig.nextStatus,
-      };
-      const result = await confirmAction(intent, connectedWallet, undefined, txHash, selectedNetwork);
+      const result = await confirmAction(
+        intent,
+        connectedWallet,
+        undefined,
+        txHash,
+        selectedNetwork,
+        txData.preparedTransactionId,
+        txData.intentHash
+      );
       if (!result.error) {
         refreshBalance();
       }
       replaceMessageInCurrentChat(actionMessageId, (message) => ({
         ...message,
-        status: result.error ? 'error' : 'success',
+        status: result.error ? 'error' : 'submitted',
         intent,
-        txHash: result.txHash,
-        consensusTxId: result.consensusTxId,
+        txHash: result.txHash || txHash,
+        transactionDiagnostics: result.transactionDiagnostics,
+        consensusTxId: result.consensusTxId || result.txHash || txHash,
+        consensusStatus: result.consensusStatus,
+        consensusNetwork: selectedNetwork,
+        preparedTransactionId: result.preparedTransactionId || txData.preparedTransactionId,
+        intentHash: result.intentHash || txData.intentHash,
         content: result.error
           ? `Workflow action failed: ${result.error}`
           : result.content || `Workflow action '${actionConfig.method}' submitted to GenLayer.`,
@@ -1252,7 +2017,9 @@ export default function ChatInterface() {
               onCancel={handleCancel}
               onUpdateIntent={handleIntentUpdate}
               onWorkflowAction={handleWorkflowAction}
+              onNotaryAction={handleNotaryAction}
               onRunCommand={handleQuickAction}
+              walletAddress={connectedWallet ?? undefined}
             />
           ))}
           {isLoading && (

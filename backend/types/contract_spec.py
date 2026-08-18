@@ -11,9 +11,9 @@ ContractType = Literal[
     "bounty",
     "ai_arbitration",
     "web_verified_payment",
-    "screenshot_verification",
     "content_moderation",
     "contract_factory",
+    "counter",
 ]
 
 
@@ -25,7 +25,7 @@ class ContractSpec:
     participants: int = 1
     release_condition: str | None = None
     payment_condition: str | None = None
-    amount: float | None = None
+    amount: str | None = None
     token: str = "GEN"
     advanced: bool = False
     features: list[str] = field(default_factory=list)

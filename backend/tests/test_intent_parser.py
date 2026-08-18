@@ -13,7 +13,7 @@ def test_normalize_transfer_intent():
     )
 
     assert intent["action"] == "transfer"
-    assert intent["amount"] == 10
+    assert intent["amount"] == "10"
     assert intent["token"] == "GEN"
 
 
@@ -38,6 +38,39 @@ def test_one_address_escrow_uses_connected_wallet_as_buyer():
     assert intent["action"] == "escrow"
     assert intent["buyer"] == buyer
     assert intent["seller"] == seller
-    assert intent["amount"] == 20
+    assert intent["amount"] == "20"
     assert intent["token"] == "GEN"
     assert intent["description"] == f"a satisfied job is submitted by {seller}"
+
+
+def test_conditional_payment_pattern_extracts_https_evidence_sources():
+    recipient = "0x2222222222222222222222222222222222222222"
+    first_source = "https://example.com/official-record"
+    second_source = "https://status.example.org/delivery"
+
+    intent = parse_with_patterns(
+        f"pay 1 GEN to {recipient} when delivery is accepted using {first_source} "
+        f"and {second_source}.",
+    )
+
+    assert intent["action"] == "conditional_payment"
+    assert intent["amount"] == "1"
+    assert intent["condition"] == "delivery is accepted"
+    assert intent["evidenceSources"] == [first_source, second_source]
+
+
+def test_conditional_payment_pattern_preserves_source_order_deduplicates_and_caps_sources():
+    recipient = "0x2222222222222222222222222222222222222222"
+    sources = [
+        "https://example.com/one",
+        "https://example.com/two",
+        "https://example.com/one",
+        "https://example.com/three",
+        "https://example.com/four",
+    ]
+
+    intent = parse_with_patterns(
+        f"send 2 GEN to {recipient} if delivery accepted: {' '.join(sources)}"
+    )
+
+    assert intent["evidenceSources"] == [sources[0], sources[1], sources[3]]

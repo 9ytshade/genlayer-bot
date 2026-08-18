@@ -8,9 +8,14 @@ from typing import Any
 from dotenv import load_dotenv
 from groq import Groq
 
+from ..contract_artifacts import artifact_metadata
 from ..generators.contract_generator import ContractGenerator, class_name
 from ..types.contract_spec import ContractSpec, ContractType
 from ..validators.contract_validator import ContractValidator
+from .product_capabilities import (
+    SCREENSHOT_VERIFICATION,
+    disabled_generation_capability,
+)
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
 
@@ -23,9 +28,9 @@ SUPPORTED_TYPES: tuple[ContractType, ...] = (
     "bounty",
     "ai_arbitration",
     "web_verified_payment",
-    "screenshot_verification",
     "content_moderation",
     "contract_factory",
+    "counter",
 )
 
 
@@ -37,7 +42,12 @@ class ContractGenerationService:
         self.validator = ContractValidator()
 
     def generate(self, request_text: str, advanced: bool = False) -> dict[str, Any]:
+        if self._requests_screenshot_verification(request_text):
+            return self._disabled_result(SCREENSHOT_VERIFICATION)
         spec = self.build_specification(request_text, advanced=advanced)
+        disabled = disabled_generation_capability(spec.contract_type)
+        if disabled:
+            return self._disabled_result(disabled)
         code = self.generator.generate(spec)
         validation = self.validator.validate(code)
         if not validation["valid"]:
@@ -59,9 +69,13 @@ class ContractGenerationService:
             "code": code,
             "fileName": file_name,
             "validation": validation,
+            **artifact_metadata(code, "generated"),
         }
 
     def build_specification(self, request_text: str, advanced: bool = False) -> ContractSpec:
+        normalized_request = request_text.lower()
+        if "counter" in normalized_request or "increment" in normalized_request:
+            return self._build_spec_heuristically(request_text, advanced)
         if self.client:
             llm_spec = self._build_spec_with_llm(request_text, advanced)
             if llm_spec:
@@ -72,9 +86,9 @@ class ContractGenerationService:
         prompt = """
         Convert the user's request into a strict JSON contract specification.
         Do not generate Python code.
-        Supported contractType values: escrow, conditional_payment, subscription, dao_voting, treasury, bounty, ai_arbitration, web_verified_payment, screenshot_verification, content_moderation, contract_factory.
+        Supported contractType values: escrow, conditional_payment, subscription, dao_voting, treasury, bounty, ai_arbitration, web_verified_payment, content_moderation, contract_factory, counter.
         Use web_verified_payment when the user wants to verify conditions using live web/API data.
-        Use screenshot_verification when the user wants to verify visual content of a webpage.
+        Do not select screenshot verification; that capability is currently unavailable.
         Use content_moderation when the user wants AI-powered content review against guidelines.
         Fields: contractType, contractName, description, participants, releaseCondition, paymentCondition, amount, token, features.
         Use concise safe defaults when the user omits details.
@@ -140,7 +154,15 @@ class ContractGenerationService:
 
     def _build_spec_heuristically(self, request_text: str, advanced: bool) -> ContractSpec:
         text = request_text.lower()
-        if "escrow" in text:
+        if "counter" in text or "increment" in text:
+            ctype: ContractType = "counter"
+            name_match = re.search(r"\bnamed\s+([A-Za-z_][A-Za-z0-9_]*)", request_text, re.IGNORECASE)
+            if not name_match:
+                name_match = re.search(r"\b([A-Z][A-Za-z0-9_]*(?:Counter|Canary)[A-Za-z0-9_]*)\b", request_text)
+            name = name_match.group(1) if name_match else "CounterContract"
+            condition = "counter_increment"
+            participants = 1
+        elif "escrow" in text:
             ctype: ContractType = "escrow"
             name = "EscrowContract"
             condition = "mutual_approval"
@@ -175,11 +197,6 @@ class ContractGenerationService:
             name = "WebVerifiedPaymentContract"
             condition = request_text.strip() or "API condition is met"
             participants = 2
-        elif any(kw in text for kw in ("screenshot", "verify website", "visual", "page content", "webpage")):
-            ctype = "screenshot_verification"
-            name = "ScreenshotVerificationContract"
-            condition = request_text.strip() or "page content matches criteria"
-            participants = 1
         elif any(kw in text for kw in ("moderate", "moderation", "content review", "guidelines", "flag content")):
             ctype = "content_moderation"
             name = "ContentModerationContract"
@@ -197,7 +214,7 @@ class ContractGenerationService:
             participants = 2
 
         amount_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:gen|token|tokens)?", text)
-        amount = float(amount_match.group(1)) if amount_match else None
+        amount = amount_match.group(1) if amount_match else None
         return ContractSpec(
             contract_type=ctype,
             contract_name=name,
@@ -212,6 +229,24 @@ class ContractGenerationService:
             metadata={"source": "heuristic_specification"},
         )
 
+    @staticmethod
+    def _requests_screenshot_verification(request_text: str) -> bool:
+        text = request_text.lower()
+        return any(
+            keyword in text
+            for keyword in ("screenshot", "visual verification", "rendered webpage", "rendered website")
+        )
+
+    @staticmethod
+    def _disabled_result(capability) -> dict[str, Any]:
+        return {
+            "ok": False,
+            "message": capability.message,
+            "errors": [capability.message],
+            "warnings": [],
+            "capabilityCode": capability.code,
+        }
+
     def explain(self, spec: ContractSpec) -> str:
         fallback = {
             "escrow": "This contract acts as an escrow that can receive native GEN deposits. Funds are releasable only after both parties approve. It uses the payable __receive__ method to accept transfers.",
@@ -222,9 +257,9 @@ class ContractGenerationService:
             "bounty": "This contract lets an issuer accept a bounty submission and record the winning submitter.",
             "ai_arbitration": "This contract uses GenLayer AI consensus with comparative equivalence to produce a dispute ruling from submitted evidence. Multiple validators independently reason about the dispute and agree on semantically equivalent outcomes.",
             "web_verified_payment": "This contract fetches live data from a web API using gl.nondet.web.get() and uses AI to evaluate whether a real-world condition is satisfied before releasing payment. Ideal for sports scores, flight status, price feeds, and weather-based conditions.",
-            "screenshot_verification": "This contract captures a webpage screenshot using gl.nondet.web.render() and analyzes it with AI vision (gl.nondet.exec_prompt with images) to verify visual content against specified criteria.",
             "content_moderation": "This contract uses AI consensus to moderate submitted content against community guidelines. It returns structured JSON decisions with severity levels using gl.nondet.exec_prompt(response_format='json').",
             "contract_factory": "This contract serves as a factory to deploy child contracts. It tracks deployed child addresses and provides methods to query them.",
+            "counter": "This deterministic canary contract stores a public counter, increments it by one, and exposes the current value without payments, web access, or AI calls.",
         }[spec.contract_type]
         if not self.client:
             return fallback

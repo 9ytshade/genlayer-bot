@@ -2,16 +2,18 @@
 
 import React, { useState } from 'react';
 import { Check, Copy, ExternalLink, Settings2 } from 'lucide-react';
-import type { Intent } from '../lib/api';
+import type { ConsensusStatus, ExecutionStatus, Intent, MessageStatus } from '../lib/api';
 
 interface DeployContractPanelProps {
   intent: Intent;
   disabled?: boolean;
   txHash?: string;
   consensusTxId?: string;
+  consensusStatus?: ConsensusStatus;
+  executionStatus?: ExecutionStatus;
   contractAddress?: string;
   derivedAddresses?: string[];
-  status?: 'pending' | 'simulating' | 'awaiting_input' | 'awaiting_confirmation' | 'executing' | 'success' | 'error';
+  status?: MessageStatus;
   onChange: (patch: Partial<Intent>) => void;
 }
 
@@ -69,14 +71,67 @@ export default function DeployContractPanel({
   disabled = false,
   txHash,
   consensusTxId,
+  consensusStatus,
+  executionStatus,
   contractAddress,
   derivedAddresses = [],
   status,
   onChange,
 }: DeployContractPanelProps) {
   const sourceName = intent.source_file_name || `${intent.contract_name || 'contract'}.py`;
-  const hasBroadcast = Boolean(txHash || consensusTxId || contractAddress || derivedAddresses.length > 0 || status === 'success');
-  const statusLabel = status === 'success' ? 'deployment result' : status === 'executing' ? 'broadcasting' : 'not broadcast';
+  const hasBroadcast = Boolean(
+    txHash
+    || consensusTxId
+    || contractAddress
+    || derivedAddresses.length > 0
+    || status === 'success'
+    || status === 'finalized'
+  );
+  const statusLabel = status === 'success'
+    ? 'execution successful'
+    : status === 'finalized'
+      ? 'finalized, verifying execution'
+      : status === 'error'
+        ? (
+            executionStatus === 'FINISHED_WITH_ERROR'
+              ? 'execution failed'
+              : (consensusStatus || 'failed').replaceAll('_', ' ').toLowerCase()
+          )
+    : status === 'submitted'
+      ? (consensusStatus || 'submitted').replaceAll('_', ' ').toLowerCase()
+      : status === 'executing'
+        ? 'broadcasting'
+        : 'not broadcast';
+  const statusTone = status === 'success'
+    ? 'border-accent-success/45 bg-accent-success/5 text-accent-success'
+    : status === 'error'
+      ? 'border-accent-danger/45 bg-accent-danger/5 text-accent-danger'
+      : status === 'executing' || status === 'submitted'
+        ? 'border-accent-primary/45 bg-accent-primary/5 text-accent-primary'
+        : 'border-accent-warning/45 bg-accent-warning/5 text-accent-warning';
+  const detailsTone = status === 'error'
+    ? 'border-accent-danger/35 bg-accent-danger/10'
+    : status === 'finalized'
+      ? 'border-accent-warning/35 bg-accent-warning/10'
+      : 'border-accent-success/35 bg-accent-success/10';
+  const contractAddressFallback = status === 'error'
+    ? 'Unavailable because deployment did not complete successfully.'
+    : status === 'finalized'
+      ? 'Consensus finalized; waiting for a verified GenVM execution result.'
+      : status === 'success'
+        ? 'Execution succeeded, but no contract address was returned.'
+        : hasBroadcast
+          ? 'Available after finalized successful execution.'
+          : 'Generated after deploy when available.';
+  const derivedAddressesFallback = status === 'error'
+    ? 'Unavailable because deployment did not complete successfully.'
+    : status === 'finalized'
+      ? 'Waiting for a verified GenVM execution result.'
+      : status === 'success'
+        ? 'No derived deployment addresses were returned.'
+        : hasBroadcast
+          ? 'Available after finalized successful execution.'
+          : 'Shown after deploy when available.';
   const configuredTxExplorerBase = process.env.NEXT_PUBLIC_EXPLORER_TX_URL;
   const txExplorerBase = configuredTxExplorerBase || 'https://explorer-studio.genlayer.com/tx/';
   const txExplorerUrl = txHash && /^0x[a-fA-F0-9]{64}$/.test(txHash) ? `${txExplorerBase}${txHash}` : null;
@@ -100,13 +155,7 @@ export default function DeployContractPanel({
             {sourceName}
           </h3>
         </div>
-        <span className={`status-pill ${
-          status === 'success'
-            ? 'border-accent-success/45 bg-accent-success/5 text-accent-success'
-            : status === 'executing'
-              ? 'border-accent-primary/45 bg-accent-primary/5 text-accent-primary'
-              : 'border-accent-warning/45 bg-accent-warning/5 text-accent-warning'
-        }`}>
+        <span className={`status-pill ${statusTone}`}>
           {statusLabel}
         </span>
       </div>
@@ -129,6 +178,13 @@ export default function DeployContractPanel({
             {sourceName}
           </div>
         </label>
+
+        <div className="flex min-w-0 flex-col gap-1 md:col-span-2">
+          <span className="micro-label">Reviewed Source SHA-256</span>
+          <div className="field-input min-w-0 break-all px-3 py-2 font-mono text-[10px] text-text-secondary">
+            {intent.source_hash || 'Source must be generated or validated again.'}
+          </div>
+        </div>
 
         <label className="flex flex-col gap-1 md:col-span-2">
           <span className="micro-label">Constructor Args JSON Array</span>
@@ -205,12 +261,14 @@ export default function DeployContractPanel({
         </label>
 
         <div className="md:col-span-2 flex flex-wrap gap-2">
-          <span className="status-pill border-accent-success/45 bg-accent-success/5 text-accent-success">Python syntax valid</span>
-          <span className="status-pill border-accent-success/45 bg-accent-success/5 text-accent-success">IntelligentContract class found</span>
-          <span className="status-pill border-accent-warning/45 bg-accent-warning/5 text-accent-warning">RPC latency warning</span>
+          <span className="status-pill border-accent-success/45 bg-accent-success/5 text-accent-success">source hash bound</span>
+          <span className="status-pill border-accent-success/45 bg-accent-success/5 text-accent-success">GenVM runtime pinned</span>
+          <span className="status-pill border-accent-primary/45 bg-accent-primary/5 text-accent-primary">
+            validator recorded
+          </span>
         </div>
 
-        <div className="md:col-span-2 rounded-[10px] border border-accent-success/35 bg-accent-success/10 p-4 font-mono text-[10px] text-text-secondary">
+        <div className={`md:col-span-2 rounded-[10px] border p-4 font-mono text-[10px] text-text-secondary ${detailsTone}`}>
           <div className="grid gap-2 sm:grid-cols-[150px_minmax(0,1fr)]">
             <DeploymentValue
               label="EVM Tx Hash"
@@ -230,7 +288,7 @@ export default function DeployContractPanel({
             <DeploymentValue
               label="Contract Address"
               value={contractAddress}
-              fallback={hasBroadcast ? 'Not generated or not returned for this deployment result.' : 'Generated after deploy when available.'}
+              fallback={contractAddressFallback}
               copiedKey={copiedKey}
               onCopy={handleCopy}
             />
@@ -255,9 +313,7 @@ export default function DeployContractPanel({
                     );
                   })}
                 </span>
-              ) : hasBroadcast
-                  ? 'No derived addresses were returned for this contract.'
-                  : 'Shown after deploy when available.'}
+              ) : derivedAddressesFallback}
             </span>
           </div>
         </div>
