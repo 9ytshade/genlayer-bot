@@ -16,8 +16,10 @@ export interface WorkflowConfig {
 export interface ConditionalPaymentConfig extends WorkflowConfig {
   workflowType: 'conditional_payment';
   recipient: string;
-  amount: number;
+  amount: number | string;
+  amountWei?: string;
   condition: string;
+  evidenceSources?: string[];
 }
 
 // Escrow Workflow
@@ -25,7 +27,8 @@ export interface EscrowConfig extends WorkflowConfig {
   workflowType: 'escrow';
   buyer: string;
   seller: string;
-  amount: number;
+  amount: number | string;
+  amountWei?: string;
   description?: string;
 }
 
@@ -33,7 +36,8 @@ export interface EscrowConfig extends WorkflowConfig {
 export interface SubscriptionConfig extends WorkflowConfig {
   workflowType: 'subscription';
   recipient: string;
-  amount: number;
+  amount: number | string;
+  amountWei?: string;
   frequency: PaymentFrequency;
   nextPaymentDate?: string;
 }
@@ -42,7 +46,8 @@ export interface SubscriptionConfig extends WorkflowConfig {
 export interface BountyConfig extends WorkflowConfig {
   workflowType: 'bounty';
   title: string;
-  reward: number;
+  reward: number | string;
+  rewardWei?: string;
   description?: string;
 }
 
@@ -52,16 +57,6 @@ export type AnyWorkflowConfig =
   | EscrowConfig
   | SubscriptionConfig
   | BountyConfig;
-
-// Contract Template Information
-export interface ContractTemplate {
-  name: string;
-  workflowType: WorkflowType;
-  description: string;
-  requiredParams: string[];
-  optionalParams: string[];
-  pythonTemplate: string;
-}
 
 // Workflow Dashboard State
 export interface WorkflowDashboardState {

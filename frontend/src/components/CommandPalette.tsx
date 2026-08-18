@@ -14,10 +14,8 @@ interface CommandPaletteProps {
 const commonCommands = [
   { label: 'Check Balance', command: 'What is my balance?' },
   { label: 'Send Tokens', command: 'Send 10 GEN to' },
-  { label: 'Conditional Payment', command: 'Pay 100 GEN to 0x if ETH reaches 10000' },
   { label: 'Escrow Service', command: 'Create escrow for 500 GEN between 0x and 0x' },
   { label: 'Subscription Payment', command: 'Send 50 GEN weekly to 0x' },
-  { label: 'Bounty Management', command: 'Create 1000 GEN bounty for landing page' },
   { label: 'Deploy Contract', command: 'Deploy contract' },
   { label: 'Generate Contract', command: '/generate-contract ' },
   { label: 'Get Help', command: 'help' },

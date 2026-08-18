@@ -1,4 +1,6 @@
 import os
+import re
+from decimal import Decimal, InvalidOperation
 from typing import Any
 from web3 import Web3
 
@@ -16,8 +18,28 @@ SUPPORTED_ACTIONS = {
     "bounty",
     "debug_trace",
     "appeal_transaction",
+    "notarize_claim",
     "unknown",
 }
+
+
+DECIMAL_AMOUNT_PATTERN = re.compile(r"^(?:0|[1-9]\d*)(?:\.\d{1,18})?$")
+
+
+def _normalize_decimal_amount(value: Any, *, allow_zero: bool = False) -> str | None:
+    if isinstance(value, bool) or isinstance(value, float) or value is None:
+        return None
+    text = str(value).strip()
+    if not DECIMAL_AMOUNT_PATTERN.fullmatch(text):
+        return None
+    try:
+        amount = Decimal(text)
+    except InvalidOperation:
+        return None
+    if not amount.is_finite() or amount < 0 or (amount == 0 and not allow_zero):
+        return None
+    normalized = format(amount, "f")
+    return normalized.rstrip("0").rstrip(".") if "." in normalized else normalized
 
 
 def normalize_intent(raw_intent: dict[str, Any]) -> dict[str, Any]:
@@ -31,11 +53,7 @@ def normalize_intent(raw_intent: dict[str, Any]) -> dict[str, Any]:
     intent: dict[str, Any] = {"action": action}
 
     if action == "transfer":
-        amount = raw_intent.get("amount")
-        try:
-            intent["amount"] = float(amount) if amount is not None else None
-        except (TypeError, ValueError):
-            intent["amount"] = None
+        intent["amount"] = _normalize_decimal_amount(raw_intent.get("amount"))
 
         token = str(raw_intent.get("token", "GEN")).strip().upper()
         intent["token"] = token or "GEN"
@@ -76,13 +94,29 @@ def normalize_intent(raw_intent: dict[str, Any]) -> dict[str, Any]:
             intent["consensus_max_rotations"] = None
 
         intent["leader_only"] = bool(raw_intent.get("leader_only", False))
+
+        for field in (
+            "source_hash",
+            "source_origin",
+            "py_genlayer_dependency",
+            "genlayer_sdk_version",
+            "generator_version",
+            "validator_version",
+            "compiler_version",
+        ):
+            value = raw_intent.get(field)
+            if value is not None:
+                intent[field] = str(value)
+        artifact_version = raw_intent.get("artifact_version")
+        if artifact_version is not None:
+            try:
+                intent["artifact_version"] = int(artifact_version)
+            except (TypeError, ValueError):
+                pass
         
         amount = raw_intent.get("amount")
         if amount:
-            try:
-                intent["amount"] = float(amount)
-            except (TypeError, ValueError):
-                intent["amount"] = None
+            intent["amount"] = _normalize_decimal_amount(amount)
         
         recipient = raw_intent.get("recipient")
         if recipient:
@@ -91,6 +125,15 @@ def normalize_intent(raw_intent: dict[str, Any]) -> dict[str, Any]:
         workflow_config = raw_intent.get("workflow_config")
         if isinstance(workflow_config, dict):
             intent["workflow_config"] = workflow_config
+        notary_spec = raw_intent.get("notary_spec")
+        if isinstance(notary_spec, dict):
+            intent["notary_spec"] = notary_spec
+        notary_operation = raw_intent.get("notary_operation")
+        if notary_operation:
+            intent["notary_operation"] = str(notary_operation).strip().lower()
+        claim_id = raw_intent.get("claim_id")
+        if claim_id:
+            intent["claim_id"] = str(claim_id).strip()
 
     elif action == "generate_contract":
         intent["logic_description"] = str(raw_intent.get("logic_description", raw_intent.get("prompt", ""))).strip()
@@ -115,16 +158,22 @@ def normalize_intent(raw_intent: dict[str, Any]) -> dict[str, Any]:
         next_status = raw_intent.get("next_status")
         if next_status:
             intent["next_status"] = str(next_status).strip().lower()
+        notary_spec = raw_intent.get("notary_spec")
+        if isinstance(notary_spec, dict):
+            intent["notary_spec"] = notary_spec
+        notary_operation = raw_intent.get("notary_operation")
+        if notary_operation:
+            intent["notary_operation"] = str(notary_operation).strip().lower()
+        claim_id = raw_intent.get("claim_id")
+        if claim_id:
+            intent["claim_id"] = str(claim_id).strip()
 
     elif action in {"conditional_payment", "escrow", "subscription", "bounty"}:
         token = str(raw_intent.get("token", "GEN")).strip().upper()
         intent["token"] = token or "GEN"
         if action in {"conditional_payment", "subscription"}:
             intent["recipient"] = str(raw_intent.get("recipient", "")).strip()
-            try:
-                intent["amount"] = float(raw_intent.get("amount") or 0)
-            except (TypeError, ValueError):
-                intent["amount"] = 0
+            intent["amount"] = _normalize_decimal_amount(raw_intent.get("amount"))
         if action == "conditional_payment":
             intent["condition"] = str(raw_intent.get("condition", "")).strip()
         if action == "subscription":
@@ -133,17 +182,11 @@ def normalize_intent(raw_intent: dict[str, Any]) -> dict[str, Any]:
             intent["buyer"] = str(raw_intent.get("buyer", "")).strip()
             intent["seller"] = str(raw_intent.get("seller", "")).strip()
             intent["description"] = str(raw_intent.get("description", "")).strip()
-            try:
-                intent["amount"] = float(raw_intent.get("amount") or 0)
-            except (TypeError, ValueError):
-                intent["amount"] = 0
+            intent["amount"] = _normalize_decimal_amount(raw_intent.get("amount"))
         if action == "bounty":
             intent["title"] = str(raw_intent.get("title", "")).strip()
             intent["description"] = str(raw_intent.get("description", "")).strip()
-            try:
-                intent["reward"] = float(raw_intent.get("reward") or 0)
-            except (TypeError, ValueError):
-                intent["reward"] = 0
+            intent["reward"] = _normalize_decimal_amount(raw_intent.get("reward"))
 
     elif action == "debug_trace":
         intent["tx_hash"] = str(raw_intent.get("tx_hash", "")).strip()
@@ -151,6 +194,23 @@ def normalize_intent(raw_intent: dict[str, Any]) -> dict[str, Any]:
     elif action == "appeal_transaction":
         intent["tx_hash"] = str(raw_intent.get("tx_hash", "")).strip()
         intent["consensus_tx_id"] = str(raw_intent.get("consensus_tx_id", "")).strip()
+
+    elif action == "notarize_claim":
+        claimant = raw_intent.get("claimant_address")
+        intent["claimant_address"] = str(claimant).strip() if claimant else None
+        raw_spec = raw_intent.get("notary_spec")
+        if not isinstance(raw_spec, dict):
+            raw_spec = {}
+        source_urls = raw_spec.get("source_urls", raw_spec.get("sourceUrls", []))
+        intent["notary_spec"] = {
+            "claim_id": str(raw_spec.get("claim_id", raw_spec.get("claimId", ""))).strip(),
+            "statement": str(raw_spec.get("statement", "")).strip(),
+            "source_urls": source_urls if isinstance(source_urls, list) else [],
+            "rubric": str(raw_spec.get("rubric", "")).strip(),
+            "freshness_rule": str(
+                raw_spec.get("freshness_rule", raw_spec.get("freshnessRule", ""))
+            ).strip(),
+        }
 
     return intent
 
@@ -160,13 +220,15 @@ def validate_intent(intent: dict[str, Any]) -> tuple[bool, str]:
         return False, "Unknown intent."
 
     if intent.get("action") == "transfer":
-        amount = intent.get("amount")
-        if not amount or amount <= 0:
+        amount = _normalize_decimal_amount(intent.get("amount"))
+        if amount is None:
             return False, "Invalid transfer amount."
 
-        max_amount = float(os.getenv("MAX_TRANSFER_AMOUNT", 1000))
-        if amount > max_amount:
-            return False, f"Transfer amount exceeds maximum limit of {max_amount} GEN."
+        max_amount_text = _normalize_decimal_amount(os.getenv("MAX_TRANSFER_AMOUNT", "1000"))
+        if max_amount_text is None:
+            return False, "Transfer amount limit is misconfigured."
+        if Decimal(amount) > Decimal(max_amount_text):
+            return False, f"Transfer amount exceeds maximum limit of {max_amount_text} GEN."
 
         supported_tokens = os.getenv("SUPPORTED_TOKENS", "GEN").upper().split(",")
         supported_tokens = [token.strip() for token in supported_tokens if token.strip()]
@@ -199,7 +261,7 @@ def validate_intent(intent: dict[str, Any]) -> tuple[bool, str]:
         # In that case constructor parameters are collected by the deploy UI, so
         # do not require natural-language payment fields like amount/recipient.
         if not intent.get("code") and intent.get("contract_type") in ["escrow", "conditional_payment"]:
-            if not intent.get("amount") or intent.get("amount") <= 0:
+            if _normalize_decimal_amount(intent.get("amount")) is None:
                 return False, f"Amount is required for {intent.get('contract_type')}."
             if not intent.get("recipient"):
                 return False, f"Recipient is required for {intent.get('contract_type')}."
@@ -241,5 +303,16 @@ def validate_intent(intent: dict[str, Any]) -> tuple[bool, str]:
     if intent.get("action") == "appeal_transaction":
         if not intent.get("tx_hash") and not intent.get("consensus_tx_id"):
             return False, "Transaction hash or consensus transaction ID is required for appeal."
+
+    if intent.get("action") == "notarize_claim":
+        claimant = intent.get("claimant_address")
+        if not claimant:
+            return False, "Connect the claimant wallet before reviewing a Notary claim."
+        try:
+            from .services.notary_service import validate_notary_spec
+
+            validate_notary_spec(intent.get("notary_spec") or {}, claimant)
+        except ValueError as exc:
+            return False, str(exc)
 
     return True, ""

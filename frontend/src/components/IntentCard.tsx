@@ -1,6 +1,6 @@
 import React from 'react';
 import { Intent } from '../lib/api';
-import { TerminalSquare, Send, Wallet, FileCode, Sparkles, ClipboardCheck, Repeat, Handshake, Trophy, Workflow, Bug, ShieldAlert } from 'lucide-react';
+import { TerminalSquare, Send, Wallet, FileCode, Sparkles, ClipboardCheck, Repeat, Handshake, Trophy, Workflow, Bug, ShieldAlert, ShieldCheck } from 'lucide-react';
 import RiskIndicator from './RiskIndicator';
 
 const ACTION_ICON = {
@@ -16,6 +16,7 @@ const ACTION_ICON = {
   bounty: Trophy,
   debug_trace: Bug,
   appeal_transaction: ShieldAlert,
+  notarize_claim: ShieldCheck,
   unknown: TerminalSquare,
 } as const;
 
@@ -44,6 +45,8 @@ export default function IntentCard({ intent }: { intent: Intent }) {
         return 'SUBSCRIPTION_WORKFLOW';
       case 'bounty':
         return 'BOUNTY_WORKFLOW';
+      case 'notarize_claim':
+        return 'AI_NOTARY';
       default:
         return intent.action.toUpperCase();
     }
