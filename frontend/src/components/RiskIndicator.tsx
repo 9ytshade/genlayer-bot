@@ -13,7 +13,7 @@ export default function RiskIndicator({ intent }: RiskIndicatorProps) {
     }
 
     if (intent.action === 'transfer') {
-      const amount = intent.amount || 0;
+      const amount = Number(intent.amount || 0);
       
       // High risk: > 1000 tokens
       if (amount > 1000) {

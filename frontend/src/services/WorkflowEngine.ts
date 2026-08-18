@@ -8,7 +8,6 @@ import type {
   BountyConfig,
 } from '@/types/WorkflowConfig';
 import type { Intent } from '@/lib/api';
-import { ContractRegistry } from './ContractRegistry';
 
 /**
  * Check if a string is a valid Ethereum address
@@ -19,14 +18,15 @@ function isValidEthereumAddress(address: string): boolean {
 
 const ADDRESS_REGEX = /0x[a-fA-F0-9]{40}/g;
 const AMOUNT_REGEX = /(\d+(?:\.\d+)?)\s*(GEN|ETH|TOKEN|TOKENS)?/i;
+const HTTPS_URL_REGEX = /https:\/\/[^\s<>'"`]+/gi;
 
 function extractAddresses(text: string): string[] {
   return text.match(ADDRESS_REGEX) || [];
 }
 
-function extractAmount(text: string): number | null {
+function extractAmount(text: string): string | null {
   const match = text.match(AMOUNT_REGEX);
-  return match ? Number(match[1]) : null;
+  return match?.[1] || null;
 }
 
 function extractToken(text: string): string {
@@ -34,13 +34,13 @@ function extractToken(text: string): string {
   return (match?.[1] || 'GEN').toUpperCase();
 }
 
+function extractEvidenceSources(text: string): string[] {
+  return Array.from(new Set(text.match(HTTPS_URL_REGEX) || [])).slice(0, 3);
+}
+
 function extractEscrowDescription(text: string): string {
   const releaseMatch = text.match(/\b(?:when|after)\b\s+(.+)$/i);
   return releaseMatch?.[1]?.trim().replace(/[.?!]+$/, '') || text.trim();
-}
-
-function amountToUnits(amount: number): number {
-  return Math.max(1, Math.round(amount));
 }
 
 export class WorkflowEngine {
@@ -86,11 +86,13 @@ export class WorkflowEngine {
 
     if (workflowType === 'conditional_payment') {
       const condition = this.extractCondition(message);
+      const evidenceSources = extractEvidenceSources(message);
       config = {
         workflowType,
         recipient: addresses[0] || '',
-        amount: amount || 0,
+        amount: amount || '',
         condition,
+        evidenceSources,
         ...base,
       };
     }
@@ -103,7 +105,7 @@ export class WorkflowEngine {
         workflowType,
         buyer,
         seller,
-        amount: amount || 0,
+        amount: amount || '',
         description: extractEscrowDescription(message),
         ...base,
       };
@@ -113,7 +115,7 @@ export class WorkflowEngine {
       config = {
         workflowType,
         recipient: addresses[0] || '',
-        amount: amount || 0,
+        amount: amount || '',
         frequency: this.extractFrequency(message),
         nextPaymentDate: this.getNextPaymentLabel(this.extractFrequency(message)),
         ...base,
@@ -124,7 +126,7 @@ export class WorkflowEngine {
       config = {
         workflowType,
         title: this.extractBountyTitle(message),
-        reward: amount || 0,
+        reward: amount || '',
         description: message,
         ...base,
       };
@@ -219,6 +221,9 @@ export class WorkflowEngine {
       recipient: intent.recipient,
       amount: intent.amount,
       condition: intent.condition,
+      evidenceSources: Array.isArray(intent.evidenceSources)
+        ? intent.evidenceSources.filter((source): source is string => typeof source === 'string').slice(0, 3)
+        : [],
       ...baseConfig,
     } as ConditionalPaymentConfig;
   }
@@ -297,7 +302,7 @@ export class WorkflowEngine {
         } else if (!isValidEthereumAddress(cp.recipient)) {
           errors.push('Recipient must be a valid Ethereum address (0x followed by 40 hex characters)');
         }
-        if (!cp.amount || cp.amount <= 0)
+        if (!cp.amount || Number(cp.amount) <= 0)
           errors.push('Amount must be greater than 0');
         if (!cp.condition) errors.push('Condition is required');
         break;
@@ -314,7 +319,7 @@ export class WorkflowEngine {
         } else if (!isValidEthereumAddress(escrow.seller)) {
           errors.push('Seller must be a valid Ethereum address');
         }
-        if (!escrow.amount || escrow.amount <= 0)
+        if (!escrow.amount || Number(escrow.amount) <= 0)
           errors.push('Amount must be greater than 0');
         if (escrow.buyer === escrow.seller)
           errors.push('Buyer and seller must be different addresses');
@@ -327,7 +332,7 @@ export class WorkflowEngine {
         } else if (!isValidEthereumAddress(sub.recipient)) {
           errors.push('Recipient must be a valid Ethereum address');
         }
-        if (!sub.amount || sub.amount <= 0)
+        if (!sub.amount || Number(sub.amount) <= 0)
           errors.push('Amount must be greater than 0');
         if (!sub.frequency) errors.push('Frequency is required');
         if (!['daily', 'weekly', 'monthly', 'yearly'].includes(sub.frequency)) {
@@ -340,7 +345,7 @@ export class WorkflowEngine {
       case 'bounty': {
         const bounty = config as BountyConfig;
         if (!bounty.title) errors.push('Bounty title is required');
-        if (!bounty.reward || bounty.reward <= 0)
+        if (!bounty.reward || Number(bounty.reward) <= 0)
           errors.push('Reward must be greater than 0');
         break;
       }
@@ -353,43 +358,6 @@ export class WorkflowEngine {
       valid: errors.length === 0,
       errors,
     };
-  }
-
-  /**
-   * Generate contract code from workflow configuration
-   */
-  static generateContractCode(config: AnyWorkflowConfig): string {
-    const template = ContractRegistry.getTemplate(config.workflowType);
-    if (!template) {
-      return '';
-    }
-
-    // Get the Python template and customize it with config values
-    let code = template.pythonTemplate;
-
-    // Add configuration comments
-    const configComment = this.generateConfigComment(config);
-    code = configComment + '\n' + code;
-
-    return code;
-  }
-
-  static getConstructorArgs(config: AnyWorkflowConfig, walletAddress: string): unknown[] {
-    switch (config.workflowType) {
-      case 'conditional_payment':
-        return [walletAddress, config.recipient, amountToUnits(config.amount), config.condition, config.token];
-      case 'escrow':
-        return [config.buyer || walletAddress, config.seller, amountToUnits(config.amount), config.token, config.description || 'Escrow workflow'];
-      case 'subscription':
-        return [walletAddress, config.recipient, amountToUnits(config.amount), config.token, config.frequency];
-      case 'bounty':
-        return [walletAddress, config.title, amountToUnits(config.reward), config.token, config.description || config.title];
-    }
-  }
-
-  static getContractName(config: AnyWorkflowConfig): string {
-    const template = ContractRegistry.getTemplate(config.workflowType);
-    return template?.name || `${config.workflowType}_contract`;
   }
 
   private static extractCondition(message: string): string {
@@ -423,50 +391,6 @@ export class WorkflowEngine {
     if (frequency === 'monthly') date.setMonth(date.getMonth() + 1);
     if (frequency === 'yearly') date.setFullYear(date.getFullYear() + 1);
     return date.toLocaleDateString();
-  }
-
-  private static generateConfigComment(config: AnyWorkflowConfig): string {
-    let comment = `# Workflow Configuration\n`;
-    comment += `# Type: ${config.workflowType}\n`;
-    comment += `# Token: ${config.token}\n`;
-
-    switch (config.workflowType) {
-      case 'conditional_payment': {
-        const cp = config as ConditionalPaymentConfig;
-        comment += `# Recipient: ${cp.recipient}\n`;
-        comment += `# Amount: ${cp.amount}\n`;
-        comment += `# Condition: ${cp.condition}\n`;
-        break;
-      }
-      case 'escrow': {
-        const escrow = config as EscrowConfig;
-        comment += `# Buyer: ${escrow.buyer}\n`;
-        comment += `# Seller: ${escrow.seller}\n`;
-        comment += `# Amount: ${escrow.amount}\n`;
-        if (escrow.description) {
-          comment += `# Description: ${escrow.description}\n`;
-        }
-        break;
-      }
-      case 'subscription': {
-        const sub = config as SubscriptionConfig;
-        comment += `# Recipient: ${sub.recipient}\n`;
-        comment += `# Amount: ${sub.amount}\n`;
-        comment += `# Frequency: ${sub.frequency}\n`;
-        break;
-      }
-      case 'bounty': {
-        const bounty = config as BountyConfig;
-        comment += `# Title: ${bounty.title}\n`;
-        comment += `# Reward: ${bounty.reward}\n`;
-        if (bounty.description) {
-          comment += `# Description: ${bounty.description}\n`;
-        }
-        break;
-      }
-    }
-
-    return comment;
   }
 
   /**

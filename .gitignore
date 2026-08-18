@@ -28,6 +28,7 @@ wheels/
 .pytest_cache/
 .coverage
 htmlcov/
+artifacts/
 
 # Frontend
 node_modules/
@@ -67,6 +68,7 @@ Thumbs.db
 # Misc
 .cache/
 .tmp/
+*.exe
 temp/
 tmp/
 fix.md
@@ -74,3 +76,7 @@ handover_prompt.md
 Fix Prompt.txt
 Full Project Ananlysis.txt
 Build
+
+# Local dependency environments
+backend/.venv/
+genlayer-docs (1).txt

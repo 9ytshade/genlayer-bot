@@ -1,6 +1,7 @@
 import json
 import os
 import re
+from decimal import Decimal, InvalidOperation
 from groq import Groq
 from dotenv import load_dotenv
 
@@ -18,15 +19,18 @@ def extract_ethereum_address(text: str) -> str:
     matches = re.findall(r'0x[a-fA-F0-9]{40}', text)
     return matches[0] if matches else ""
 
-def extract_amount(text: str) -> float:
-    """Extract the first number mentioned as amount."""
+def extract_amount(text: str) -> str:
+    """Extract an exact, non-exponent decimal amount as text."""
     match = re.search(r'(\d+(?:\.\d+)?)\s*(?:GEN|ETH|BTC)?', text)
     if match:
         try:
-            return float(match.group(1))
-        except:
+            amount = Decimal(match.group(1))
+            if amount.is_finite() and amount > 0:
+                normalized = format(amount, "f")
+                return normalized.rstrip("0").rstrip(".") if "." in normalized else normalized
+        except InvalidOperation:
             pass
-    return 0
+    return "0"
 
 def extract_escrow_description(text: str) -> str:
     """Extract the human release/delivery condition for escrow descriptions."""
@@ -34,27 +38,129 @@ def extract_escrow_description(text: str) -> str:
     return match.group(1).strip(" .?!") if match else text.strip()
 
 
+def extract_https_urls(text: str) -> list[str]:
+    return [
+        match.rstrip(".,);]")
+        for match in re.findall(r"https://[^\s<>\"']+", text, re.IGNORECASE)
+    ]
+
+
+def extract_notary_statement(text: str, source_urls: list[str]) -> str:
+    statement = text
+    for source_url in source_urls:
+        statement = statement.replace(source_url, " ")
+    statement = re.sub(
+        r"^\s*(?:please\s+)?(?:notarize|fact[- ]?check|verify(?:\s+the)?\s+claim|attest)\s+(?:whether\s+)?",
+        "",
+        statement,
+        flags=re.IGNORECASE,
+    )
+    statement = re.split(r"\busing\b|\bwith evidence from\b", statement, maxsplit=1, flags=re.IGNORECASE)[0]
+    return " ".join(statement.strip(" .,:;-").split())
+
+
+def _extract_notary_labeled_value(text: str, labels: str) -> str:
+    match = re.search(
+        rf"(?:^|\n)\s*(?:{labels})\s*:\s*(.+?)(?=\n\s*(?:claim|statement|sources?|rubric|freshness(?:\s+rule)?)\s*:|\Z)",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    return " ".join(match.group(1).strip().split()) if match else ""
+
+
+def merge_notary_spec_context(raw_spec: dict | None, user_input: str) -> dict:
+    """Merge a follow-up chat message into a partial Notary blueprint."""
+    context = raw_spec if isinstance(raw_spec, dict) else {}
+    existing_sources = context.get("source_urls", context.get("sourceUrls", []))
+    source_urls = [str(url).strip() for url in existing_sources] if isinstance(existing_sources, list) else []
+    for source_url in extract_https_urls(user_input):
+        if source_url not in source_urls:
+            source_urls.append(source_url)
+
+    statement = str(context.get("statement") or "").strip()
+    labeled_statement = _extract_notary_labeled_value(user_input, "claim|statement")
+    if labeled_statement:
+        statement = labeled_statement
+    elif not statement:
+        candidate = extract_notary_statement(user_input, extract_https_urls(user_input))
+        if candidate and not re.match(
+            r"^(?:sources?|rubric|freshness(?:\s+rule)?)\s*:",
+            candidate,
+            flags=re.IGNORECASE,
+        ):
+            statement = candidate
+
+    rubric = str(context.get("rubric") or "").strip()
+    labeled_rubric = _extract_notary_labeled_value(user_input, "rubric")
+    if labeled_rubric:
+        rubric = labeled_rubric
+
+    freshness_rule = str(
+        context.get("freshness_rule") or context.get("freshnessRule") or ""
+    ).strip()
+    labeled_freshness = _extract_notary_labeled_value(
+        user_input,
+        r"freshness(?:\s+rule)?",
+    )
+    if labeled_freshness:
+        freshness_rule = labeled_freshness
+
+    return {
+        "statement": statement,
+        "source_urls": source_urls,
+        "rubric": rubric,
+        "freshness_rule": freshness_rule,
+    }
+
+
 def parse_with_patterns(user_input: str, wallet_address: str | None = None) -> dict:
     """Fallback pattern-based parser for common workflows."""
     lower_input = user_input.lower()
+
+    # AI NOTARY patterns
+    if any(
+        pattern in lower_input
+        for pattern in ("notarize", "notary", "fact-check", "fact check", "verify the claim", "attest")
+    ):
+        source_urls = extract_https_urls(user_input)
+        return {
+            "action": "notarize_claim",
+            "claimant_address": wallet_address,
+            "notary_spec": {
+                "statement": extract_notary_statement(user_input, source_urls),
+                "source_urls": source_urls,
+                "rubric": "",
+                "freshness_rule": "",
+            },
+        }
     
     # CONDITIONAL PAYMENT patterns
     if any(pattern in lower_input for pattern in ['if ', 'when ', 'reaches ', 'exceeds ', 'drops ', 'falls ']):
         if any(p in lower_input for p in ['pay', 'send', 'transfer']):
+            source_urls = list(dict.fromkeys(extract_https_urls(user_input)))[:3]
             # Extract condition
             condition_match = re.search(r'(?:if|when)\s+(.+?)(?:$|\.)', user_input)
             condition = condition_match.group(1).strip() if condition_match else "condition met"
+            condition = re.split(
+                r"\b(?:using|with evidence from)\b",
+                condition,
+                maxsplit=1,
+                flags=re.IGNORECASE,
+            )[0].strip()
+            for source_url in source_urls:
+                condition = condition.replace(source_url, " ").strip()
             
             recipient = extract_ethereum_address(user_input)
             amount = extract_amount(user_input)
             
-            if recipient and is_valid_ethereum_address(recipient) and amount > 0:
+            if recipient and is_valid_ethereum_address(recipient) and amount != "0":
                 return {
                     "action": "conditional_payment",
                     "recipient": recipient,
                     "amount": amount,
                     "token": "GEN",
-                    "condition": condition
+                    "condition": condition,
+                    "evidenceSources": source_urls,
                 }
             elif not recipient:
                 # No valid address found
@@ -80,7 +186,7 @@ def parse_with_patterns(user_input: str, wallet_address: str | None = None) -> d
             elif 'yearly' in lower_input or 'year' in lower_input or 'annual' in lower_input:
                 frequency = 'yearly'
             
-            if amount > 0:
+            if amount != "0":
                 return {
                     "action": "subscription",
                     "recipient": recipient,
@@ -105,7 +211,7 @@ def parse_with_patterns(user_input: str, wallet_address: str | None = None) -> d
             else:
                 return {"action": "unknown", "error": "Escrow requires a seller wallet address and a connected buyer wallet"}
             
-            if amount > 0 and is_valid_ethereum_address(buyer) and is_valid_ethereum_address(seller):
+            if amount != "0" and is_valid_ethereum_address(buyer) and is_valid_ethereum_address(seller):
                 return {
                     "action": "escrow",
                     "buyer": buyer,
@@ -123,7 +229,7 @@ def parse_with_patterns(user_input: str, wallet_address: str | None = None) -> d
         title_match = re.search(r'bounty\s+(?:for\s+)?(.+?)(?:\$|\.|$)', user_input)
         title = title_match.group(1).strip() if title_match else "Bounty"
         
-        if amount > 0:
+        if amount != "0":
             return {
                 "action": "bounty",
                 "title": title,
@@ -140,7 +246,7 @@ def parse_with_patterns(user_input: str, wallet_address: str | None = None) -> d
             if not recipient or not is_valid_ethereum_address(recipient):
                 return {"action": "unknown", "error": "Valid wallet address required for transfer"}
             
-            if amount > 0:
+            if amount != "0":
                 return {
                     "action": "transfer",
                     "recipient": recipient,
@@ -201,7 +307,13 @@ SUPPORTED ACTIONS:
 - escrow: Secure payment between two parties
 - subscription: Recurring payment at intervals
 - bounty: Reward for work/submissions
+- notarize_claim: Evaluate a public claim against one to three HTTPS evidence sources
 - unknown: Cannot determine intent
+
+AI NOTARY DETECTION:
+Requirements: connected claimant wallet, claim statement, one to three public HTTPS evidence URLs
+Patterns: "Notarize whether [claim] using https://...", "Fact-check [claim] with evidence from https://..."
+Extract: claimant_address, notary_spec with statement, source_urls, optional rubric, optional freshness_rule
 
 CONDITIONAL PAYMENT DETECTION:
 Requirements: recipient wallet address, amount, condition
@@ -265,6 +377,7 @@ IMPORTANT RULES:
 - If user mentions one seller address in an escrow request, use CONNECTED_WALLET_ADDRESS as buyer when available
 - If user mentions reward/bounty for work, it's BOUNTY
 - Default token is always GEN if not specified
+- AI Notary evidence must use public HTTPS URLs; never accept credentials or private documents
 - Return only the action and required parameters
 - If any required wallet address is missing or invalid, set action to "unknown"
 """
@@ -280,7 +393,7 @@ IMPORTANT RULES:
                     "properties": {
                         "action": {
                             "type": "string",
-                            "enum": ["transfer", "check_balance", "deploy_contract", "generate_contract", "contract_review", "conditional_payment", "escrow", "subscription", "bounty", "unknown"]
+                            "enum": ["transfer", "check_balance", "deploy_contract", "generate_contract", "contract_review", "conditional_payment", "escrow", "subscription", "bounty", "notarize_claim", "unknown"]
                         },
                         "amount": {"type": "number"},
                         "token": {"type": "string"},
@@ -290,12 +403,29 @@ IMPORTANT RULES:
                         "logic_description": {"type": "string"},
                         "advanced": {"type": "boolean"},
                         "condition": {"type": "string"},
+                        "evidenceSources": {
+                            "type": "array",
+                            "items": {"type": "string"}
+                        },
                         "buyer": {"type": "string"},
                         "seller": {"type": "string"},
                         "description": {"type": "string"},
                         "frequency": {"type": "string"},
                         "title": {"type": "string"},
-                        "reward": {"type": "number"}
+                        "reward": {"type": "number"},
+                        "claimant_address": {"type": "string"},
+                        "notary_spec": {
+                            "type": "object",
+                            "properties": {
+                                "statement": {"type": "string"},
+                                "source_urls": {
+                                    "type": "array",
+                                    "items": {"type": "string"}
+                                },
+                                "rubric": {"type": "string"},
+                                "freshness_rule": {"type": "string"}
+                            }
+                        }
                     },
                     "required": ["action"]
                 }

@@ -20,8 +20,13 @@ The core rule of the app is simple: the bot never executes raw LLM output direct
 - In-chat deploy parameter editor for constructor args, kwargs, value, gas limit, rotations, and leader-only mode
 - Studionet deployment transaction builder using the GenLayer consensus contract
 - Deployment result display with EVM tx hash, consensus tx id, contract address, and generated addresses
-- Trusted workflow templates for conditional payments, escrow, subscriptions, and bounties
-- GenLayer contract-call transaction builder for deployed workflow actions
+- Persistent lifecycle tracking that separates EVM broadcast/acceptance, GenLayer consensus, and GenVM execution
+- Automated contract preflight for structural, safety, GenLayer-native, and deployment-readiness findings
+- Deterministic escrow and subscription workflow templates with connected-wallet transaction preparation
+- Read-only display for legacy conditional-payment and bounty records; new deployment and actions are disabled pending their GenLayer rebuild phases
+- Read-only authoritative appealability metadata; appeal preparation, submission, and confirmation are disabled pending real appeal proof
+- Screenshot-verification generation is disabled pending exact rendered-image validation and Studionet proof
+- GenLayer contract-call transaction builder for supported deployed deterministic workflow actions
 - Live activity log panel with in-memory logs locally and optional Redis-backed logs in production
 - Render-ready backend deployment with Supabase Postgres
 - Vercel-ready frontend deployment
@@ -89,12 +94,27 @@ User chat input
   -> safety validation
   -> simulation or deploy preparation
   -> user confirmation
+  -> authenticated backend builder persists a single-use reviewed intent envelope
   -> wallet-side transaction broadcast
-  -> backend receipt polling and result formatting
+  -> backend verifies wallet, chain, destination, calldata, value, nonce, gas, and fees against the envelope
+  -> backend EVM receipt confirmation and consensus tx-id extraction
+  -> frontend GenLayer consensus polling with backoff
+  -> finalized GenVM execution verification
+  -> successful deployment details and result formatting
   -> chat result and activity logs
 ```
 
-The frontend owns wallet interaction. The backend prepares safe transaction data, validates contract uploads, checks balances through configured RPC endpoints, and confirms transaction receipts after the wallet broadcasts them.
+The frontend owns wallet interaction. SIWE binds the session to the connected wallet. Every transfer, deployment, workflow deployment, and contract call is prepared for that authenticated wallet and stored as a short-lived, single-use intent envelope before the wallet broadcasts it. Confirmation accepts only the resulting transaction hash, reads the transaction from the selected RPC, and rejects any wallet, chain, destination, calldata, value, nonce, gas, or fee mismatch. Raw signed transactions are not relayed by the backend.
+
+After exact EVM transaction verification, the chat polls canonical GenLayer consensus status independently so an EVM receipt is never presented as consensus finality. Finalized consensus is also kept separate from GenVM execution: only `FINISHED_WITH_RETURN` is shown as successful, `FINISHED_WITH_ERROR` is shown as failed, and unavailable execution results remain in a finalized-but-verifying state.
+
+Generated and workflow contract source is owned by the backend. Every reviewed artifact includes an exact SHA-256 source hash plus the pinned `py-genlayer` dependency, SDK, generator, validator, and compiler versions. The deployment builder rejects stale or modified reviews and encodes the exact source bytes whose hash was displayed; the frontend no longer contains duplicate Python workflow templates.
+
+## GenLayer Readiness
+
+All future feature work follows the repository's GenLayer readiness and research rules. Read the [GenLayer Readiness and Feature Research Charter](docs/genlayer-readiness-charter.md) before proposing an Intelligent Contract feature, and use the [GenLayer Hardening Backlog](docs/genlayer-hardening-backlog.md) for the current implementation order.
+
+The charter requires Ideas-page provenance, explicit equivalence criteria, consensus and appeal behavior, correct GEN value movement, authenticated transaction intent, GenVM/Studio proof, and truthful finality reporting. Escrow and subscription are currently deterministic workflows, not GenLayer judgment claims. Conditional-payment and bounty generation, deployment, and actions are disabled until their dedicated rebuild phases are complete. Screenshot verification and appeal submission are also disabled until their complete protocol paths are proven.
 
 ## Backend
 
@@ -130,7 +150,10 @@ Use the equivalent activation command for macOS or Linux if needed.
 
 ```bash
 DATABASE_URL=sqlite:///./genlayer_bot.db
-JWT_SECRET=your_long_random_secret
+APP_ENV=production
+JWT_SECRET=your_random_secret_with_at_least_32_characters
+SIWE_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+SIWE_CHAIN_IDS=
 GROQ_API_KEY=your_groq_api_key_here
 
 GENLAYER_RPC_URL_STUDIONET=https://studio.genlayer.com/api
@@ -205,10 +228,11 @@ NEXT_PUBLIC_BRADBURY_RPC=https://rpc-bradbury.genlayer.com
 1. User asks to send tokens to an address.
 2. Bot parses and validates the transfer intent.
 3. User reviews simulation, risk, and gas estimate.
-4. User confirms.
-5. Frontend sends the transaction through the connected wallet.
-6. Backend confirms the receipt.
-7. Chat shows success or error, and the wallet balance refreshes.
+4. Authenticated backend preparation stores the exact reviewed transfer envelope and intent hash.
+5. User confirms and the frontend broadcasts through the connected wallet.
+6. Backend reads the submitted transaction and rejects any envelope mismatch.
+7. Backend confirms the receipt.
+8. Chat shows success or error, and the wallet balance refreshes.
 
 ### Deploy Intelligent Contract
 
@@ -216,18 +240,24 @@ NEXT_PUBLIC_BRADBURY_RPC=https://rpc-bradbury.genlayer.com
 2. Frontend and backend reject non-`.py` files.
 3. Backend validates Python syntax and basic contract structure.
 4. Chat shows deployment parameters for review.
-5. Backend builds the Studionet consensus-contract transaction.
+5. Authenticated backend preparation builds the Studionet consensus-contract transaction and persists its reviewed envelope.
 6. Frontend sends it through the connected wallet.
-7. Backend polls the receipt, extracts consensus and deployment details, and returns them to chat.
+7. Backend verifies the submitted transaction exactly, consumes the envelope once, confirms the EVM receipt, and extracts the GenLayer consensus transaction id.
+8. Frontend polls the canonical GenLayer lifecycle using the confirmed envelope identity until a terminal result is reached; finalized transactions with an unavailable GenVM result remain pollable.
+9. Only finalized deployments with successful GenVM execution show the contract address and addresses of triggered child deployments.
 
 ### Workflow Contracts
 
-1. User describes a conditional payment, escrow, subscription, or bounty.
-2. The UI and backend validate the workflow configuration.
-3. Backend selects the trusted workflow template and builds the GenLayer deployment transaction.
-4. User signs deployment from their connected wallet.
-5. Dashboard actions build GenLayer contract-call transactions through the backend and are signed by the connected wallet.
-6. Backend confirms receipts and stores workflow deployment/action metadata for the authenticated wallet.
+1. New workflow preparation is available only for deterministic escrow and subscription behavior.
+2. The UI and backend validate the supported workflow configuration.
+3. Backend generates and validates the trusted workflow template, returns its pinned runtime metadata and source hash for review, then rejects any stale review before building the deployment transaction.
+4. The backend derives the exact GEN value in wei: escrow funds deployment, while subscriptions attach the configured amount only to individual deterministic payment calls.
+5. User signs deployment and supported actions from the connected wallet.
+6. Backend verifies each submitted transaction against its single-use envelope before confirming an EVM receipt or storing lifecycle metadata; the EVM receipt is not described as GenLayer finality.
+7. Dashboards read canonical finalized contract state for balances, payouts, refunds, payment counts, and status.
+8. Existing conditional-payment and bounty records remain readable, but their new generation, deployment, settlement, review, winner-selection, and closure paths fail closed until Phases 5-7 and 12 are implemented and proven.
+
+Activity-log HTTP and WebSocket access also requires the authenticated SIWE session. Activity events are wallet-scoped, redacted, bounded, and retained through the configured in-memory or Redis-backed store.
 
 ### Chat History
 

@@ -12,10 +12,7 @@ interface ConfirmationProps {
 
 const estimateGas = (intent: Intent): number => {
   if (intent.action === 'transfer') {
-    return 21000 + (intent.amount || 0) * 10;
-  }
-  if (intent.action === 'check_balance') {
-    return 2300;
+    return 21000 + Number(intent.amount || 0) * 10;
   }
   if (intent.action === 'deploy_contract') {
     if (typeof intent.gas_limit === 'number') {
@@ -39,9 +36,14 @@ export default function ConfirmationButtons({ intent, status, onConfirm, onCance
       <div className="flex items-center justify-between p-3 bg-bg-elevated border border-border-strong rounded text-[11px] font-mono">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 text-text-secondary">
-            <Zap size={12} className="text-accent-primary" />
-            <span>GAS_ESTIMATE:</span>
-            <span className="text-accent-primary font-bold">{gasEstimate} WEI</span>
+            <Zap size={12} className="text-accent-primary" />            {intent.action === 'check_balance' ? (
+              <span className="text-accent-primary font-bold">READ-ONLY // NO GAS</span>
+            ) : (
+              <>
+                <span>GAS_ESTIMATE:</span>
+                <span className="text-accent-primary font-bold">{gasEstimate} WEI</span>
+              </>
+            )}
           </div>
         </div>
         <RiskIndicator intent={intent} />

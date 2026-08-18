@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Send, Wallet, FileCode, Sparkles, Repeat, Handshake, Trophy } from 'lucide-react';
+import { Send, Wallet, FileCode, Sparkles, Repeat, Handshake } from 'lucide-react';
 
 interface QuickActionsProps {
   onSelectAction: (action: string) => void;
@@ -13,10 +13,8 @@ export default function QuickActions({ onSelectAction }: QuickActionsProps) {
     { label: 'Send Tokens', command: 'Send 10 GEN to', icon: Send },
     { label: 'Generate Contract', command: '/generate-contract ', icon: Sparkles },
     { label: 'Deploy Contract', command: 'Deploy contract', icon: FileCode },
-    { label: 'Conditional Pay', command: 'Pay 100 GEN to 0x if ETH reaches 10000', icon: Send },
     { label: 'Escrow', command: 'Create escrow for 500 GEN between 0x and 0x', icon: Handshake },
     { label: 'Subscription', command: 'Send 50 GEN weekly to 0x', icon: Repeat },
-    { label: 'Bounty', command: 'Create 1000 GEN bounty for landing page', icon: Trophy },
   ];
 
   return (
