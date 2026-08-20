@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from textwrap import dedent
 
+from ..contract_artifacts import PINNED_DEPENDENCY_HEADER
 from ..types.contract_spec import ContractSpec
 
 
@@ -31,13 +32,14 @@ class ContractGenerator:
             "screenshot_verification": self._screenshot_verification,
             "content_moderation": self._content_moderation,
             "contract_factory": self._contract_factory,
+            "counter": self._counter,
         }
         return generators[spec.contract_type](spec).strip() + "\n"
 
     def _header(self, spec: ContractSpec) -> str:
         return dedent(
             f"""
-            # {{ "Depends": "py-genlayer:test" }}
+            {PINNED_DEPENDENCY_HEADER}
             from genlayer import *
 
 
@@ -405,3 +407,19 @@ class ContractGenerator:
 """
 
 
+    def _counter(self, spec: ContractSpec) -> str:
+        return f"""{self._header(spec)}
+    counter: u256
+
+    def __init__(self):
+        self.counter = u256(0)
+
+    @gl.public.write
+    def increment(self) -> u256:
+        self.counter += u256(1)
+        return self.counter
+
+    @gl.public.view
+    def get_counter(self) -> u256:
+        return self.counter
+"""

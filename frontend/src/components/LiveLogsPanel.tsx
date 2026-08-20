@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { API_BASE_URL } from '@/config';
+import { useWallet } from '@/context/WalletContext';
+import { getStoredAuthToken } from '@/lib/api';
 
 interface LogItem {
   timestamp: string;
@@ -21,6 +23,7 @@ function getWsUrl(): string {
 }
 
 export default function LiveLogsPanel({ compact = false }: { compact?: boolean }) {
+  const { account } = useWallet();
   const [logs, setLogs] = useState<LogItem[]>([]);
   const [status, setStatus] = useState<'connecting' | 'live' | 'offline'>('connecting');
 
@@ -30,8 +33,14 @@ export default function LiveLogsPanel({ compact = false }: { compact?: boolean }
     let unmounted = false;
 
     const connect = () => {
+      const token = getStoredAuthToken(account);
+      if (!account || !token) {
+        setStatus('offline');
+        retryTimer = setTimeout(connect, 1500);
+        return;
+      }
       setStatus('connecting');
-      ws = new WebSocket(getWsUrl());
+      ws = new WebSocket(getWsUrl(), ['genlayer-auth', token]);
 
       ws.onopen = () => {
         if (!unmounted) setStatus('live');
@@ -71,7 +80,7 @@ export default function LiveLogsPanel({ compact = false }: { compact?: boolean }
       if (retryTimer) clearTimeout(retryTimer);
       ws?.close();
     };
-  }, []);
+  }, [account]);
 
   const statusLabel = useMemo(() => {
     if (status === 'live') return 'LIVE';

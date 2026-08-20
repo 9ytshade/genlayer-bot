@@ -20,3 +20,15 @@ def test_allows_basic_deploy_with_code():
 
     assert valid is True
     assert error == ""
+
+
+def test_rejects_float_and_exponent_transfer_amounts():
+    recipient = "0x1111111111111111111111111111111111111111"
+
+    for amount in (0.1, "1e3", "1.0000000000000000001"):
+        valid, error = validate_intent(
+            {"action": "transfer", "amount": amount, "token": "GEN", "recipient": recipient}
+        )
+
+        assert valid is False
+        assert error == "Invalid transfer amount."
