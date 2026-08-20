@@ -14,6 +14,9 @@ export default defineConfig({
     clearMocks: true,
     fileParallelism: false,
     maxWorkers: 1,
-    pool: 'forks',
+    // On Windows, the fork pool intermittently times out before jsdom has
+    // initialized. Threads keep the same single-worker, serial semantics
+    // while making the checked-in component suite reliably runnable.
+    pool: 'threads',
   },
 });

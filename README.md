@@ -1,10 +1,10 @@
 # GenLayer Bot
 
-GenLayer Bot is a full-stack chat interface for interacting with GenLayer networks through natural language. A connected wallet can check balances, send tokens, upload Python intelligent contracts, review deployment parameters, and submit Studionet deployment transactions from a guided chat UI.
+GenLayer Bot Preview is a wallet-controlled chat interface for understanding GenLayer contracts, reviewing contract source, checking balances, and preparing safe GEN transactions. It is a testnet/demo product, not a production custody product or a guarantee that an Intelligent Contract deployment will finalize.
 
 The core rule of the app is simple: the bot never executes raw LLM output directly. User requests are parsed into structured intents, validated, simulated where possible, shown back to the user, and only executed after explicit confirmation from the connected wallet. The app is user-wallet-only: the backend prepares GenLayer transaction data, and the connected wallet signs.
 
-## Current Features
+## What You Can Use Today
 
 - Wallet connection with RainbowKit, wagmi, viem, SIWE, and backend JWT sessions
 - Network support for GenLayer Studionet and Bradbury
@@ -14,22 +14,29 @@ The core rule of the app is simple: the bot never executes raw LLM output direct
 - Natural-language balance checks
 - Wallet-side token transfers using `sendTransaction`
 - Immediate balance refresh after successful transactions
-- Python contract upload flow for GenLayer intelligent contracts
+- Python contract upload/paste and automated GenLayer-aware preflight
 - Safeguards for non-`.py` uploads
 - Python syntax and structure validation before deployment
 - In-chat deploy parameter editor for constructor args, kwargs, value, gas limit, rotations, and leader-only mode
-- Studionet deployment transaction builder using the GenLayer consensus contract
-- Deployment result display with EVM tx hash, consensus tx id, contract address, and generated addresses
-- Persistent lifecycle tracking that separates EVM broadcast/acceptance, GenLayer consensus, and GenVM execution
-- Automated contract preflight for structural, safety, GenLayer-native, and deployment-readiness findings
-- Deterministic escrow and subscription workflow templates with connected-wallet transaction preparation
-- Read-only display for legacy conditional-payment and bounty records; new deployment and actions are disabled pending their GenLayer rebuild phases
-- Read-only authoritative appealability metadata; appeal preparation, submission, and confirmation are disabled pending real appeal proof
-- Screenshot-verification generation is disabled pending exact rendered-image validation and Studionet proof
-- GenLayer contract-call transaction builder for supported deployed deterministic workflow actions
+- Safe deployment and contract-call preparation with immutable reviewed transaction intents
+- Transaction diagnostics and lifecycle display that distinguishes broadcast, EVM acceptance, consensus, and GenVM execution
+- Read-only inspection of legacy workflow records where available
 - Live activity log panel with in-memory logs locally and optional Redis-backed logs in production
 - Render-ready backend deployment with Supabase Postgres
 - Vercel-ready frontend deployment
+
+## Temporarily Unavailable
+
+GenLayer validator consensus on the recorded Studionet canary had zero participating validators and finalized with `NO_MAJORITY`. To avoid presenting a simulated or unsafe flow as real, the following remain unavailable for public use:
+
+- Intelligent Contract deployment/finalization
+- Conditional payment deployment, evidence evaluation, and settlement
+- Bounty deployment, validator review, winner selection, and payout
+- Screenshot-verification contracts
+- AI Notary live deployment and claim evaluation
+- Appeal preparation and submission
+
+These limitations do not affect wallet connection, authentication, balance checks, native GEN transfers, contract preflight, source review, or transaction preparation. See [shipping blockers](docs/SHIPPING-BLOCKERS.md) and [known limitations](docs/KNOWN-LIMITATIONS.md).
 
 ## Project Structure
 
@@ -48,8 +55,11 @@ genlayer-bot/
 |   |-- Procfile
 |   |-- alembic.ini
 |   |-- auth.py
-|   |-- contract_generator.py
+|   |-- contract_artifacts.py
 |   |-- contract_validation.py
+|   |-- transaction_intent.py
+|   |-- services/
+|   |-- validators/
 |   |-- database.py
 |   |-- genlayer_client.py
 |   |-- intent_parser.py
@@ -114,7 +124,7 @@ Generated and workflow contract source is owned by the backend. Every reviewed a
 
 All future feature work follows the repository's GenLayer readiness and research rules. Read the [GenLayer Readiness and Feature Research Charter](docs/genlayer-readiness-charter.md) before proposing an Intelligent Contract feature, and use the [GenLayer Hardening Backlog](docs/genlayer-hardening-backlog.md) for the current implementation order.
 
-The charter requires Ideas-page provenance, explicit equivalence criteria, consensus and appeal behavior, correct GEN value movement, authenticated transaction intent, GenVM/Studio proof, and truthful finality reporting. Escrow and subscription are currently deterministic workflows, not GenLayer judgment claims. Conditional-payment and bounty generation, deployment, and actions are disabled until their dedicated rebuild phases are complete. Screenshot verification and appeal submission are also disabled until their complete protocol paths are proven.
+The charter requires Ideas-page provenance, explicit equivalence criteria, consensus and appeal behavior, correct GEN value movement, authenticated transaction intent, GenVM/Studio proof, and truthful finality reporting. Escrow and subscription are currently deterministic workflows, not GenLayer judgment claims. Conditional-payment and bounty generation, deployment, and actions are disabled until their dedicated rebuild phases are complete. Screenshot verification and appeal submission are also disabled until their complete protocol paths are proven. See [architecture](docs/ARCHITECTURE.md), [trust model](docs/GENLAYER-TRUST-MODEL.md), and [known limitations](docs/KNOWN-LIMITATIONS.md) for the current boundary.
 
 ## Backend
 
@@ -234,28 +244,22 @@ NEXT_PUBLIC_BRADBURY_RPC=https://rpc-bradbury.genlayer.com
 7. Backend confirms the receipt.
 8. Chat shows success or error, and the wallet balance refreshes.
 
-### Deploy Intelligent Contract
+### Review or Prepare an Intelligent Contract
 
 1. User uploads a `.py` contract file.
 2. Frontend and backend reject non-`.py` files.
 3. Backend validates Python syntax and basic contract structure.
 4. Chat shows deployment parameters for review.
-5. Authenticated backend preparation builds the Studionet consensus-contract transaction and persists its reviewed envelope.
-6. Frontend sends it through the connected wallet.
-7. Backend verifies the submitted transaction exactly, consumes the envelope once, confirms the EVM receipt, and extracts the GenLayer consensus transaction id.
-8. Frontend polls the canonical GenLayer lifecycle using the confirmed envelope identity until a terminal result is reached; finalized transactions with an unavailable GenVM result remain pollable.
-9. Only finalized deployments with successful GenVM execution show the contract address and addresses of triggered child deployments.
+5. The backend can prepare a reviewed deployment intent, binding the exact source and transaction fields.
+6. Deployment broadcasting is currently unavailable for public use because a healthy validator consensus environment has not yet been proven.
+7. Once validator health is restored, the frontend will send the reviewed intent through the connected wallet and the backend will verify the submitted transaction exactly.
 
 ### Workflow Contracts
 
-1. New workflow preparation is available only for deterministic escrow and subscription behavior.
+1. Workflow records may be inspected, but public workflow deployment and write actions are currently unavailable.
 2. The UI and backend validate the supported workflow configuration.
-3. Backend generates and validates the trusted workflow template, returns its pinned runtime metadata and source hash for review, then rejects any stale review before building the deployment transaction.
-4. The backend derives the exact GEN value in wei: escrow funds deployment, while subscriptions attach the configured amount only to individual deterministic payment calls.
-5. User signs deployment and supported actions from the connected wallet.
-6. Backend verifies each submitted transaction against its single-use envelope before confirming an EVM receipt or storing lifecycle metadata; the EVM receipt is not described as GenLayer finality.
-7. Dashboards read canonical finalized contract state for balances, payouts, refunds, payment counts, and status.
-8. Existing conditional-payment and bounty records remain readable, but their new generation, deployment, settlement, review, winner-selection, and closure paths fail closed until Phases 5-7 and 12 are implemented and proven.
+3. The backend retains trusted templates, exact integer-wei handling, source hashes, and intent integrity checks for the later re-enable.
+4. Existing conditional-payment and bounty records remain readable, but their new generation, deployment, settlement, review, winner-selection, and closure paths fail closed until validator health and full lifecycle proof are available.
 
 Activity-log HTTP and WebSocket access also requires the authenticated SIWE session. Activity events are wallet-scoped, redacted, bounded, and retained through the configured in-memory or Redis-backed store.
 
@@ -360,6 +364,8 @@ Frontend:
 ```bash
 cd frontend
 npm run lint
+npm run test:lifecycle
+npm run test:notary
 npm run build
 ```
 
@@ -368,36 +374,16 @@ npm run build
 - Never commit `.env` files, private keys, JWT secrets, or wallet secrets.
 - The backend must only prepare GenLayer transaction data; the connected wallet signs user transactions.
 - Backend auth uses SIWE nonces and JWTs; do not replace it with raw wallet-address bearer tokens.
-- Contract uploads are validated for file type and Python structure, but deeper semantic auditing is still future hardening.
+- Contract uploads receive an automated GenLayer-aware preflight. It is advisory, not a formal security audit; deployment is still restricted to a reviewed immutable source artifact.
 - Use Supabase RLS policies if you expose any tables through Supabase APIs.
 
-## Current Status
+## Release Status
 
-Completed:
+**Public preview — safe to test:** wallet connection, SIWE authentication, balance checks, native GEN transfers, natural-language intent parsing, automated contract preflight, source review, transaction previews, and integrity diagnostics.
 
-- Balance checking
-- Token transfers
-- Wallet-side transaction broadcasting
-- SIWE authentication and backend JWT sessions
-- Supabase Postgres database target
-- Render backend deployment support
-- Studionet deploy transaction builder
-- GenLayer workflow contract-call transaction builder
-- Python contract upload and validation
-- Deploy parameter UI
-- Deployment result display
-- Wallet-scoped chat history
-- Desktop chat sidebar
-- Automatic wallet network switching
-- Trusted workflow templates and persisted workflow deployment metadata
-- Vercel frontend deployment support
+**Not ready to ship:** Intelligent Contract deployment, validator-dependent workflows, evidence-based decisions, payouts/refunds from Intelligent Contracts, screenshots, AI Notary evaluation, and appeals. The recorded Studionet canary had no participating validators, so this repository does not claim a successful live consensus lifecycle proof.
 
-Planned hardening:
-
-- Database-backed transaction history
-- Production Redis for logs and live activity events
-- Better semantic validation for intelligent contracts
-- Production-grade observability and alerting
+Current blockers and re-enable gates are documented in [Shipping Blockers](docs/SHIPPING-BLOCKERS.md) and [Known Limitations](docs/KNOWN-LIMITATIONS.md).
 
 ## License
 

@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test:lifecycle": "node --test src/lib/consensusLifecycle.test.mjs",
-    "test:notary": "vitest run src/components/Message.test.tsx --pool=forks --maxWorkers=1 --no-file-parallelism && vitest run src/components/NotaryPanels.test.tsx --pool=forks --maxWorkers=1 --no-file-parallelism && vitest run src/components/WorkflowTruthfulness.test.tsx --pool=forks --maxWorkers=1 --no-file-parallelism && vitest run src/lib/api.test.ts --pool=forks --maxWorkers=1 --no-file-parallelism"
+    "test:notary": "vitest run src/components/Message.test.tsx --pool=threads --maxWorkers=1 --no-file-parallelism && vitest run src/components/NotaryPanels.test.tsx --pool=threads --maxWorkers=1 --no-file-parallelism && vitest run src/components/WorkflowTruthfulness.test.tsx --pool=threads --maxWorkers=1 --no-file-parallelism && vitest run src/lib/api.test.ts --pool=threads --maxWorkers=1 --no-file-parallelism"
   },
   "dependencies": {
     "@rainbow-me/rainbowkit": "^2.2.10",
