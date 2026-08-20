@@ -6,7 +6,7 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///./test_chat_router.db")
 from fastapi.testclient import TestClient
 
 from backend.auth import create_access_token, normalize_address
-from backend.database import SessionLocal
+from backend.database import SessionLocal, init_db
 from backend.main import app
 from backend.models import PreparedTransaction, User
 from backend.routers import chat
@@ -17,6 +17,10 @@ CONSENSUS_TX_ID = "0x" + "ab" * 32
 
 
 def ensure_user(wallet_address: str) -> str:
+    # This module queries before TestClient starts the application lifespan.
+    # Initialize the isolated SQLite schema explicitly so a clean CI runner
+    # does not depend on another test having created it first.
+    init_db()
     normalized = normalize_address(wallet_address)
     db = SessionLocal()
     try:
