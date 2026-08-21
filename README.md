@@ -2,6 +2,10 @@
 
 GenLayer Bot Preview is a wallet-controlled chat interface for understanding GenLayer contracts, reviewing contract source, checking balances, and preparing safe GEN transactions. It is a testnet/demo product, not a production custody product or a guarantee that an Intelligent Contract deployment will finalize.
 
+The current proof process is evidence-first: every GenLayer result is separated into EVM submission, validator participation, consensus result, GenVM execution, and canonical contract-state readback. See [Network Diagnostics](docs/NETWORK-DIAGNOSTICS.md) and [Submission Proof](docs/SUBMISSION-PROOF.md).
+
+The current proof level for every feature is tracked in the [Evidence-First Proof Matrix](docs/PROOF-MATRIX.md). Features are not promoted from `NOT_RUN` or `BLOCKED_EXTERNAL` by documentation alone.
+
 The core rule of the app is simple: the bot never executes raw LLM output directly. User requests are parsed into structured intents, validated, simulated where possible, shown back to the user, and only executed after explicit confirmation from the connected wallet. The app is user-wallet-only: the backend prepares GenLayer transaction data, and the connected wallet signs.
 
 ## What You Can Use Today

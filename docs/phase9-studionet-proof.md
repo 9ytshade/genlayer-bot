@@ -2,7 +2,7 @@
 
 ## Outcome
 
-Phase 9 is blocked by live Studionet consensus infrastructure. The deployment transaction was wallet-approved, mined, and finalized, but no validator round ran and no contract address was produced. The lifecycle stopped before funding, evaluation, or settlement.
+Phase 9 is blocked by a suspected hosted Studionet validator/network availability condition for this transaction. The deployment transaction was wallet-approved, mined, and finalized, but no validator round ran and no contract address was produced. The lifecycle stopped before funding, evaluation, or settlement. This does not establish a platform-wide outage or a Conditional Payment source failure.
 
 This is not a completed end-to-end proof.
 
@@ -70,7 +70,7 @@ The failed transaction was not blocked by wallet ownership, chain selection, or 
 - an empty `round_validators` list
 - all three rotations still available
 
-The hosted Studio consensus data also reported no pending work and no validator activity for a fresh transaction. This is a validator-configuration/availability blocker, not evidence that the contract should be changed or that the wallet should retry blindly.
+The hosted Studio consensus data also reported no pending work and no validator activity for a fresh transaction. This is a suspected hosted validator/network availability blocker, not evidence that the contract should be changed or that the wallet should retry blindly.
 
 ## Fresh retry gate
 

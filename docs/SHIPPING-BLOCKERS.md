@@ -1,6 +1,6 @@
 # Features Not Ready for Shipping
 
-This list tracks features that must remain unavailable in the public preview. The common blocker is that the recorded Studionet canary had zero participating validators and finalized with `NO_MAJORITY`; therefore no end-to-end GenLayer consensus lifecycle has been proven.
+This list tracks features that must remain unavailable in the public preview. The historical hosted Studionet transaction recorded zero participating validators and finalized with `NO_MAJORITY`; therefore no end-to-end GenLayer consensus lifecycle has yet been proven. This is a suspected hosted validator/network availability blocker for that transaction, not evidence of a platform-wide outage or a contract-source failure. See [Network Diagnostics](NETWORK-DIAGNOSTICS.md).
 
 | Feature | Why it is not ready | Re-enable gate |
 |---|---|---|

@@ -1,0 +1,12 @@
+-r requirements.txt
+
+genvm-linter==0.7.1
+
+# Direct Mode and controlled Studio/localnet contract tests belong in an isolated
+# environment so production deployments never install test tooling.
+#
+# Compatibility blocker recorded 2026-08-21: genlayer-test==0.29.2 requires
+# genlayer-py >=0.13,<0.17, while this application pins genlayer-py==0.18.0 for
+# version-sensitive deployment transaction construction. Do not install it here
+# until GenLayer publishes a compatible test release or the SDK migration is
+# intentionally reviewed. See docs/NETWORK-DIAGNOSTICS.md.
