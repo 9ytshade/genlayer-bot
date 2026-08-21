@@ -28,6 +28,18 @@ The pinned source lives in `contracts/canaries/`.
 
 Run Canary A before changing any workflow contract. If it shows zero validators/rounds on hosted Studionet, stop retrying application deployments there. Run controlled diagnostics on Localnet, then use Bradbury for public proof when a funded test account is available.
 
+## Recorded controlled Studio result
+
+On 2026-08-21, `CanaryAStorage` was deployed in Studio Normal (Full Consensus) mode at `0x8710710053432A39686D3828b2EBf01abFf5BA25`. The deployment transaction `0x493c4ba18364095c98e2bfe921bf4e47188670c8e0c3022a93a68cecb28acc6c` and write transaction `0xe5337782ef471967ad6ddce20dc5868413c0ed51f6ef7ef46f08366ac49350b2` both showed `FINALIZED` / `SUCCESS` in Studio. The deployment panel showed four agreeing successful validators and one quorum-cancelled validator; the increment panel showed three agreeing successful validators and two quorum-cancelled validators. `get_value()` returned `1`.
+
+This establishes controlled Studio validator participation and deterministic execution. The UI evidence does not expose a numeric round count or the canonical RPC execution enum, and it is not public-network proof. The full record is in [Submission Proof](SUBMISSION-PROOF.md).
+
+`CanaryBStructuredLlm` then passed the bounded LLM/equivalence layer in the same environment. Its evaluate transaction `0xfaaf360c562e4d6b1efd2017c161f6bd974193f2ae120eeac9460ae7d209bdd6` showed `FINALIZED` / `SUCCESS`, output `YES`, and equivalence output `{"decision":"YES"}`; `get_decision()` returned `YES`. This isolates the next diagnostic step to web-rendering and vision capability, not general consensus or basic LLM equivalence.
+
+Canary C then established that this isolation matters: the leader produced `RENDERED`, but the consensus history on `0x2ca323f15b50a7b34197382c7a496b7d921d4e4bcdf36fdf7f5cb896a53f4586` had multiple leader rotations and ended `Undetermined` with validator disagreements. `get_outcome()` remained `PENDING`, so the write did not reach accepted state. Treat this as a web-render/vision equivalence failure, not as proof that the screenshot feature works.
+
+The same Studio environment completed the canonical AI Notary text/web-evidence path: registry deployment, claim submission, evaluator consensus to `CONFIRMED`, and a stored claim record with `evaluated: true` and `source_statuses: [USABLE]`. This confirms that ordinary text web retrieval and the bounded Notary equivalence rule can reach accepted consensus even though screenshot/vision agreement cannot yet. See [Submission Proof](SUBMISSION-PROOF.md).
+
 ## Direct Mode compatibility
 
 Direct Mode is normally the free first layer. This repository does not currently run it because the published `genlayer-test==0.29.2` package requires `genlayer-py <0.17`, while the application deliberately pins `genlayer-py==0.18.0` for deployment-transaction compatibility. Installing the test package would downgrade the application SDK, so it is intentionally blocked rather than silently mutating the runtime. Resolve that version mismatch in a reviewed SDK migration or use a GenLayer-supported compatible test release before recording Direct Mode as passed.
